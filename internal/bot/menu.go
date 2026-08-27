@@ -22,6 +22,7 @@ func (a *App) registerCoreHandlers(d *ext.Dispatcher) {
 	d.AddHandler(handlers.NewCommand("bind", a.wrap(a.handleBind, a.RateLimit("cmd:bind", 1))))
 	d.AddHandler(handlers.NewCommand("check_admin", a.wrap(a.handleCheckAdmin, a.RateLimit("cmd:check_admin", 1))))
 	d.AddHandler(handlers.NewCommand("cancel", a.wrap(a.handleCancel, a.RateLimit("cmd:cancel", 1))))
+	a.registerPrivateKeyboardHandlers(d)
 	d.AddHandler(handlers.NewMessage(message.All, a.handleChineseCommand))
 	a.registerSedHandlers(d)
 	d.AddHandler(handlers.NewCallback(callbackquery.Prefix(CallbackPrefix+":"), a.wrap(a.router.Handle, a.RateLimit("callback", 1))))
@@ -32,6 +33,41 @@ func (a *App) handleStart(b *gotgbot.Bot, ctx *ext.Context) error {
 		args := commandArgs(ctx)
 		if len(args) > 0 && strings.HasPrefix(args[0], "rules_") {
 			return a.handleRulesDeepLink(b, ctx, args[0])
+		}
+		if len(args) > 0 && strings.HasPrefix(args[0], "ref_") && a.services.PointCenter != nil && ctx.Message.From != nil {
+			result, err := a.services.PointCenter.RegisterReferralStart(requestScope(ctx).Context, b.User.Id, args[0], ctx.Message.From.Id)
+			if err != nil {
+				return err
+			}
+			if result.ChatID != 0 && (result.Accepted || result.Already) {
+				if err := a.setSelectedChatID(requestScope(ctx).Context, ctx.Message.From.Id, result.ChatID); err != nil {
+					return err
+				}
+			}
+			if result.ChatID != 0 && (result.Accepted || result.Already || result.Self) {
+				status := ""
+				switch {
+				case result.Self:
+					status = "不能使用自己的邀请链接。"
+				case result.Accepted:
+					status = "邀请关系已记录，完成指定群组的入群验证后即可获得奖励。"
+				case result.Already:
+					status = "邀请关系已经记录，请加入指定群组完成验证。"
+				}
+				// Referral starts are a focused onboarding flow. Do not append the
+				// regular operations console to the same update.
+				if err := a.sendReferralJoinPromptWithStatus(b, ctx, result.ChatID, status); err != nil {
+					return err
+				}
+				// The join prompt uses an inline keyboard, so send the persistent
+				// private keyboard as a separate message for the Telegram client.
+				if err := a.syncPrivateKeyboard(b, ctx); err != nil {
+					return err
+				}
+				// Explicitly stop dispatcher group iteration so a deep-link update
+				// cannot fall through to another generic private-menu handler.
+				return ext.EndGroups
+			}
 		}
 	}
 	return a.showHomeMenu(b, ctx)
@@ -185,6 +221,8 @@ func groupAdminHelpText() string {
 		"-- 设置 --",
 		"/adminconfig 查看群组配置",
 		"/set_welcome 文本 设置欢迎语（支持 {name}）",
+		"/welcome_toggle 开关欢迎消息",
+		"/set_welcome_delete 秒 设置欢迎消息自动删除",
 		"/verify_toggle 开关入群验证",
 		"/keywords 关键词规则",
 		"/invites 邀请链接管理",

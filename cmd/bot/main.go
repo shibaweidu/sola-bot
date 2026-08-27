@@ -39,7 +39,10 @@ func run() error {
 
 	resources, err := bootstrap.New(ctx, "")
 	if err != nil {
-		log.Printf("bootstrap resources unavailable; starting bot without database/redis: %v", sanitizeTokenError(err, cfg.Bot.Token))
+		if strings.TrimSpace(cfg.Database.DSN) != "" {
+			return fmt.Errorf("bootstrap resources: %w", sanitizeTokenError(err, cfg.Bot.Token))
+		}
+		log.Printf("database is not configured; starting bot without database/redis")
 	} else {
 		defer resources.Close(context.Background())
 		cfg = resources.Config
@@ -161,6 +164,7 @@ func registerBotCommands(ctx context.Context, tgBot *gotgbot.Bot) error {
 		{Command: "rank", Description: "查看积分榜单"},
 		{Command: "sign", Description: "每日签到"},
 		{Command: "lottery", Description: "查看进行中的抽奖"},
+		{Command: "daily_lottery", Description: "每日额度抽奖"},
 		{Command: "info", Description: "查看当前会话信息"},
 	}
 	groupAdminCommands := append(append([]gotgbot.BotCommand{}, groupMemberCommands...), []gotgbot.BotCommand{
@@ -184,6 +188,9 @@ func registerBotCommands(ctx context.Context, tgBot *gotgbot.Bot) error {
 		{Command: "publish", Description: "立即发布内容"},
 		{Command: "posts", Description: "查看定时任务"},
 		{Command: "adminconfig", Description: "查看群组配置"},
+		{Command: "welcome_toggle", Description: "开关新人欢迎消息"},
+		{Command: "set_welcome_delete", Description: "设置欢迎消息自动删除时间"},
+		{Command: "force_subscribe", Description: "设置强制订阅策略"},
 		{Command: "verify_toggle", Description: "开关入群验证"},
 		{Command: "keywords", Description: "查看关键词规则"},
 		{Command: "invites", Description: "管理邀请链接"},

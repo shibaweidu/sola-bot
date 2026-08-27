@@ -1,0 +1,96 @@
+package service
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/dabowin/sola/internal/bot"
+	"github.com/dabowin/sola/internal/model"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+func TestDailyLotteryDrawAndDailyLimit(t *testing.T) {
+	ctx := context.Background()
+	st := newServiceTestStore(t)
+	createPointTables(t, st.DB)
+	createPointCenterTables(t, st.DB)
+	createDailyLotteryTables(t, st.DB)
+	svc := NewDailyLotteryService(st)
+
+	if _, err := svc.UpdateConfig(ctx, bot.DailyLotteryConfig{ChatID: 1001, Enabled: true, CostPoints: 2, GuaranteeOnLast: true}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	code := model.ExchangeCode{BaseModel: model.BaseModel{ID: uuid.New(), CreatedAt: now, UpdatedAt: now}, Code: "DAILY-10", Amount: 10, Status: "available"}
+	if err := st.DB.Create(&code).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{{Amount: 10, Weight: 1000, Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewPointsService(st).AdjustUserPoints(ctx, 1001, 2001, 10, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Draw(ctx, 1001, 2001)
+	if err != nil || first.Result != "won" || first.Code != "DAILY-10" || first.Remaining != 2 {
+		t.Fatalf("first draw = %+v, err=%v", first, err)
+	}
+	if _, err := svc.Draw(ctx, 1001, 2001); err == nil {
+		t.Fatal("expected empty inventory rejection without consuming attempt")
+	}
+	status, err := svc.Status(ctx, 1001, 2001)
+	if err != nil || status.UsedAttempts != 1 || status.Remaining != 2 {
+		t.Fatalf("status = %+v, err=%v", status, err)
+	}
+	date := time.Now().In(chinaLocation()).Format("2006-01-02")
+	for i := 1; i <= 3; i++ {
+		if err := st.DB.Create(&model.DailyLotteryAttempt{ChatID: 1001, UserID: 2003, DrawDate: date, AttemptNo: i, Result: "lost"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Draw(ctx, 1001, 2003); err == nil {
+		t.Fatal("expected daily draw limit rejection")
+	}
+}
+
+func TestDailyLotteryLastAttemptGuarantee(t *testing.T) {
+	ctx := context.Background()
+	st := newServiceTestStore(t)
+	createPointTables(t, st.DB)
+	createPointCenterTables(t, st.DB)
+	createDailyLotteryTables(t, st.DB)
+	svc := NewDailyLotteryService(st)
+	if _, err := svc.UpdateConfig(ctx, bot.DailyLotteryConfig{ChatID: 1001, Enabled: true, GuaranteeOnLast: true}); err != nil {
+		t.Fatal(err)
+	}
+	date := time.Now().In(chinaLocation()).Format("2006-01-02")
+	for i := 1; i <= 2; i++ {
+		if err := st.DB.Create(&model.DailyLotteryAttempt{ChatID: 1001, UserID: 2002, DrawDate: date, AttemptNo: i, Result: "lost"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	if err := st.DB.Create(&model.ExchangeCode{BaseModel: model.BaseModel{ID: uuid.New(), CreatedAt: now, UpdatedAt: now}, Code: "DAILY-50", Amount: 50, Status: "available"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{{Amount: 50, Weight: 1, Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Draw(ctx, 1001, 2002)
+	if err != nil || result.Result != "won" || !result.Guaranteed || result.Amount != 50 {
+		t.Fatalf("guaranteed draw = %+v, err=%v", result, err)
+	}
+}
+
+func createDailyLotteryTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	execSQL(t, db,
+		`CREATE TABLE daily_lottery_configs (chat_id integer PRIMARY KEY, enabled boolean NOT NULL DEFAULT false, daily_attempts integer NOT NULL DEFAULT 3, cost_points integer NOT NULL DEFAULT 0, guarantee_on_last boolean NOT NULL DEFAULT true, created_at datetime, updated_at datetime)`,
+		`CREATE TABLE daily_lottery_prizes (id integer PRIMARY KEY AUTOINCREMENT, chat_id integer NOT NULL, amount integer NOT NULL, weight integer NOT NULL DEFAULT 1, enabled boolean NOT NULL DEFAULT true, created_at datetime, updated_at datetime)`,
+		`CREATE UNIQUE INDEX idx_daily_lottery_prize_chat_amount ON daily_lottery_prizes(chat_id, amount)`,
+		`CREATE TABLE daily_lottery_attempts (id integer PRIMARY KEY AUTOINCREMENT, chat_id integer NOT NULL, user_id integer NOT NULL, draw_date text NOT NULL, attempt_no integer NOT NULL, result text NOT NULL, amount integer NOT NULL DEFAULT 0, code_id text, cost_points integer NOT NULL DEFAULT 0, created_at datetime)`,
+		`CREATE UNIQUE INDEX idx_daily_lottery_attempt ON daily_lottery_attempts(chat_id, user_id, draw_date, attempt_no)`,
+	)
+}

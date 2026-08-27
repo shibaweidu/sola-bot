@@ -181,6 +181,35 @@ func TestPointCooldownKeyScopes(t *testing.T) {
 	}
 }
 
+func TestAdminConfigWelcomeDefaultsAndPatch(t *testing.T) {
+	cfg := defaultAdminConfig(1001)
+	if !cfg.WelcomeEnabled || cfg.WelcomeDeleteSecs != 30 {
+		t.Fatalf("welcome defaults = enabled:%t delete:%d, want true/30", cfg.WelcomeEnabled, cfg.WelcomeDeleteSecs)
+	}
+	if cfg.ForceSubscribeAction != "mute" || cfg.ForceSubscribeEnabled {
+		t.Fatalf("force subscription defaults = enabled:%t action:%q", cfg.ForceSubscribeEnabled, cfg.ForceSubscribeAction)
+	}
+
+	enabled := false
+	deleteSeconds := 0
+	forceEnabled := true
+	forceChannels := "@news\n-1001234567890"
+	forceAction := "kick"
+	applyAdminConfigPatch(&cfg, bot.ChatAdminConfigPatch{
+		WelcomeEnabled:         &enabled,
+		WelcomeDeleteSecs:      &deleteSeconds,
+		ForceSubscribeEnabled:  &forceEnabled,
+		ForceSubscribeChannels: &forceChannels,
+		ForceSubscribeAction:   &forceAction,
+	})
+	if cfg.WelcomeEnabled || cfg.WelcomeDeleteSecs != 0 {
+		t.Fatalf("welcome patch = enabled:%t delete:%d, want false/0", cfg.WelcomeEnabled, cfg.WelcomeDeleteSecs)
+	}
+	if !cfg.ForceSubscribeEnabled || cfg.ForceSubscribeChannels != forceChannels || cfg.ForceSubscribeAction != forceAction {
+		t.Fatalf("force subscription patch = enabled:%t channels:%q action:%q", cfg.ForceSubscribeEnabled, cfg.ForceSubscribeChannels, cfg.ForceSubscribeAction)
+	}
+}
+
 func TestModerationServiceKeywordsAndViolations(t *testing.T) {
 	ctx := context.Background()
 	st := newServiceTestStore(t)

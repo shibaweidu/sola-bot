@@ -36,6 +36,9 @@ func (a *App) handlePointsRank(b *gotgbot.Bot, ctx *ext.Context) error {
 
 func (a *App) handlePoints(b *gotgbot.Bot, ctx *ext.Context) error {
 	scope := requestScope(ctx)
+	if err := a.rememberGroupTarget(ctx); err != nil {
+		return err
+	}
 	if a.services.Points == nil {
 		return sendText(b, ctx, "积分服务尚未接入。", nil)
 	}
@@ -103,6 +106,9 @@ func (a *App) routePointsCallback(b *gotgbot.Bot, ctx *ext.Context, payload Call
 }
 
 func (a *App) showPointsMenu(b *gotgbot.Bot, ctx *ext.Context) error {
+	if err := a.rememberGroupTarget(ctx); err != nil {
+		return err
+	}
 	text := strings.Join([]string{
 		"💎 积分中心",
 		"━━━━━━━━━━",
@@ -118,6 +124,9 @@ func (a *App) showPointsRank(b *gotgbot.Bot, ctx *ext.Context) error {
 
 func (a *App) showPointsRankPeriod(b *gotgbot.Bot, ctx *ext.Context, period string) error {
 	scope := requestScope(ctx)
+	if err := a.rememberGroupTarget(ctx); err != nil {
+		return err
+	}
 	if a.services.Points == nil {
 		return sendText(b, ctx, "积分排行服务尚未接入。", nil)
 	}

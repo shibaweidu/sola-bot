@@ -1,0 +1,1 @@
+-- Menu migration is intentionally non-destructive on rollback.

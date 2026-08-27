@@ -17,6 +17,7 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/chatmember"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/pollanswer"
 )
@@ -28,6 +29,11 @@ func (a *App) registerVerifyHandlers(d *ext.Dispatcher) {
 	d.AddHandler(handlers.NewCommand("allowuser", a.wrap(a.handleAllowUser, a.RequirePermission(PermissionVerify), a.RateLimit("cmd:allowuser", 1))))
 	d.AddHandler(handlers.NewCommand("delallowuser", a.wrap(a.handleDelAllowUser, a.RequirePermission(PermissionVerify), a.RateLimit("cmd:delallowuser", 1))))
 	d.AddHandler(handlers.NewMessage(message.NewChatMembers, a.handleNewChatMembers))
+	// chat_member is the reliable join signal for invite-link joins. It runs
+	// after the subscription handler's group so verification and welcome logic
+	// can execute only after an unverified member has been muted.
+	d.AddHandlerToGroup(handlers.NewChatMember(chatmember.All, a.handleChatMemberJoin), 1)
+	d.AddHandler(handlers.NewMessage(message.Text, a.handleCaptchaReply))
 	d.AddHandler(handlers.NewChatJoinRequest(filters.ChatJoinRequest(func(_ *gotgbot.ChatJoinRequest) bool { return true }), a.handleChatJoinRequest))
 	d.AddHandler(handlers.NewPollAnswer(pollanswer.All, a.handlePollAnswer))
 }
@@ -145,65 +151,84 @@ func (a *App) handleNewChatMembers(b *gotgbot.Bot, ctx *ext.Context) error {
 		return err
 	}
 	for _, member := range ctx.Message.NewChatMembers {
-		if member.IsBot {
-			continue
-		}
-		if a.services.Admin != nil {
-			_ = a.services.Admin.RecordSeenUser(scope.Context, scope.Chat.ID, member.Id)
-		}
-		// Skip verification for group owner and administrators.
-		// Owners/admins joining through links still trigger new_chat_members,
-		// but asking them to verify would loop forever.
-		if chatMember, err := b.GetChatMemberWithContext(scope.Context, scope.Chat.ID, member.Id, nil); err == nil {
-			switch chatMember.(type) {
-			case gotgbot.ChatMemberOwner, gotgbot.ChatMemberAdministrator:
-				_ = a.sendWelcomeMessage(b, ctx, cfg, member)
-				continue
-			}
-		}
-		// Whitelist check: skip verification for whitelisted users
-		if isInWhitelist(cfg.VerifyWhitelist, member.Id) {
-			if err := a.sendWelcomeMessage(b, ctx, cfg, member); err != nil {
-				return err
-			}
-			continue
-		}
-		if !cfg.VerifyEnabled {
-			continue
-		}
-		_ = a.restrictForVerification(b, scope, member.Id)
-		// Mark user as unverified in Redis for link/media blocking.
-		if a.services.Redis != nil {
-			ttl := time.Duration(cfg.VerifyTimeout) * time.Second
-			if ttl <= 0 {
-				ttl = time.Minute
-			}
-			_ = a.services.Redis.Set(scope.Context, fmt.Sprintf("unverified:%d:%d", scope.Chat.ID, member.Id), "1", ttl).Err()
-		}
-		switch cfg.VerifyType {
-		case "multi_choice":
-			if err := a.sendMultiChoiceChallenge(b, ctx, cfg, member); err != nil {
-				return err
-			}
-		case "poll":
-			if err := a.sendPollChallenge(b, ctx, cfg, member); err != nil {
-				return err
-			}
-		case "math":
-			if err := a.sendMathChallenge(b, ctx, cfg, member); err != nil {
-				return err
-			}
-		case "button":
-			if err := a.sendButtonChallenge(b, ctx, cfg, member); err != nil {
-				return err
-			}
-		default:
-			if err := a.sendButtonChallenge(b, ctx, cfg, member); err != nil {
-				return err
-			}
+		if err := a.processNewMember(b, ctx, scope, cfg, member); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (a *App) handleChatMemberJoin(b *gotgbot.Bot, ctx *ext.Context) error {
+	if ctx == nil || ctx.ChatMember == nil || a.services.Admin == nil {
+		return ext.ContinueGroups
+	}
+	update := ctx.ChatMember
+	if update.Chat.Type != "group" && update.Chat.Type != "supergroup" || !isNewChatMemberStatus(update.OldChatMember, update.NewChatMember) {
+		return ext.ContinueGroups
+	}
+	cfg, err := a.services.Admin.GetConfig(requestScope(ctx).Context, update.Chat.Id)
+	if err != nil {
+		return err
+	}
+	member := update.NewChatMember.GetUser()
+	if err := a.processNewMember(b, ctx, requestScope(ctx), cfg, member); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) processNewMember(b *gotgbot.Bot, ctx *ext.Context, scope RequestScope, cfg ChatAdminConfig, member gotgbot.User) error {
+	if member.IsBot {
+		return nil
+	}
+	// A join can produce both new_chat_members and chat_member updates. Avoid
+	// sending duplicate challenges/welcome messages while keeping reward
+	// activation idempotent in the database.
+	if a.services.Redis != nil {
+		key := fmt.Sprintf("join:processed:%d:%d", scope.Chat.ID, member.Id)
+		if value, err := a.services.Redis.Get(scope.Context, key).Result(); err == nil && value == "1" {
+			return nil
+		}
+		_ = a.services.Redis.Set(scope.Context, key, "1", 30*time.Second).Err()
+	}
+	if a.services.Admin != nil {
+		_ = a.services.Admin.RecordSeenUser(scope.Context, scope.Chat.ID, member.Id)
+	}
+	// Skip verification for group owner and administrators.
+	if chatMember, err := b.GetChatMemberWithContext(scope.Context, scope.Chat.ID, member.Id, nil); err == nil {
+		switch chatMember.(type) {
+		case gotgbot.ChatMemberOwner, gotgbot.ChatMemberAdministrator:
+			return a.sendWelcomeMessage(b, ctx, cfg, member)
+		}
+	}
+	if isInWhitelist(cfg.VerifyWhitelist, member.Id) || !cfg.VerifyEnabled || cfg.VerifyType == "turnstile" {
+		return a.sendWelcomeMessage(b, ctx, cfg, member)
+	}
+	return a.startVerificationChallenge(b, ctx, cfg, member)
+}
+
+func (a *App) startVerificationChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdminConfig, member gotgbot.User) error {
+	scope := requestScope(ctx)
+	_ = a.restrictForVerification(b, scope, member.Id)
+	if a.services.Redis != nil {
+		ttl := time.Duration(cfg.VerifyTimeout) * time.Second
+		if ttl <= 0 {
+			ttl = time.Minute
+		}
+		_ = a.services.Redis.Set(scope.Context, fmt.Sprintf("unverified:%d:%d", scope.Chat.ID, member.Id), "1", ttl).Err()
+	}
+	switch cfg.VerifyType {
+	case "captcha":
+		return a.sendCaptchaChallenge(b, ctx, cfg, member)
+	case "multi_choice":
+		return a.sendMultiChoiceChallenge(b, ctx, cfg, member)
+	case "poll":
+		return a.sendPollChallenge(b, ctx, cfg, member)
+	case "math":
+		return a.sendMathChallenge(b, ctx, cfg, member)
+	default:
+		return a.sendButtonChallenge(b, ctx, cfg, member)
+	}
 }
 
 func (a *App) showVerifyMenu(b *gotgbot.Bot, ctx *ext.Context) error {
@@ -383,6 +408,7 @@ func (a *App) sendButtonChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdmi
 		messageID = sent.MessageId
 	}
 	if err := a.services.Admin.SetVerifyChallenge(requestScope(ctx).Context, cfg.ChatID, user.Id, VerifyChallenge{
+		Kind:       "button",
 		Answer:     "ok",
 		MessageID:  messageID,
 		Attempts:   1,
@@ -393,6 +419,107 @@ func (a *App) sendButtonChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdmi
 	}
 	a.scheduleVerifyTimeoutKick(b, cfg.ChatID, user.Id, timeout)
 	return nil
+}
+
+func (a *App) sendCaptchaChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdminConfig, user gotgbot.User) error {
+	timeout := time.Duration(cfg.VerifyTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = time.Minute
+	}
+	maxAttempts := 3
+	switch cfg.VerifyDifficulty {
+	case "easy":
+		timeout = 120 * time.Second
+		maxAttempts = 5
+	case "hard":
+		timeout = 30 * time.Second
+		maxAttempts = 2
+	}
+
+	name := strings.TrimSpace(user.FirstName + " " + user.LastName)
+	if name == "" {
+		name = strconv.FormatInt(user.Id, 10)
+	}
+	answer := strconv.Itoa(rand.Intn(900000) + 100000)
+	sent, err := b.SendMessageWithContext(
+		requestScope(ctx).Context,
+		cfg.ChatID,
+		fmt.Sprintf("%s，请在 %d 秒内回复验证码：%s", name, int(timeout.Seconds()), answer),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	messageID := int64(0)
+	if sent != nil {
+		messageID = sent.MessageId
+	}
+	if err := a.services.Admin.SetVerifyChallenge(requestScope(ctx).Context, cfg.ChatID, user.Id, VerifyChallenge{
+		Kind:       "captcha",
+		Answer:     answer,
+		MessageID:  messageID,
+		Attempts:   maxAttempts,
+		ExpireAt:   time.Now().Add(timeout),
+		Question:   "数字验证码",
+		MemberName: name,
+	}, timeout); err != nil {
+		return err
+	}
+	a.scheduleVerifyTimeoutKick(b, cfg.ChatID, user.Id, timeout)
+	return nil
+}
+
+func (a *App) handleCaptchaReply(b *gotgbot.Bot, ctx *ext.Context) error {
+	if ctx == nil || ctx.Message == nil || ctx.Message.From == nil || a.services.Admin == nil {
+		return ext.ContinueGroups
+	}
+	msg := ctx.Message
+	if msg.Chat.Type != "group" && msg.Chat.Type != "supergroup" {
+		return ext.ContinueGroups
+	}
+	challenge, ok, err := a.services.Admin.GetVerifyChallenge(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id)
+	if err != nil {
+		return err
+	}
+	if !ok || challenge.Kind != "captcha" {
+		return ext.ContinueGroups
+	}
+
+	_, _ = b.DeleteMessageWithContext(requestScope(ctx).Context, msg.Chat.Id, msg.MessageId, nil)
+	result, err := a.services.Admin.CheckVerifyChallenge(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id, strings.TrimSpace(msg.Text))
+	if err != nil {
+		return err
+	}
+	if !result.OK {
+		if result.ShouldKick {
+			_ = a.kickUnverifiedMember(b, msg.Chat.Id, msg.From.Id)
+			_ = a.clearUnverifiedKey(msg.Chat.Id, msg.From.Id)
+			if result.Challenge.MessageID != 0 {
+				_, _ = b.DeleteMessageWithContext(requestScope(ctx).Context, msg.Chat.Id, result.Challenge.MessageID, nil)
+			}
+			_ = a.services.Admin.RecordVerifyEvent(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id, "verify_fail", "验证码错误超过次数被踢出")
+			return nil
+		}
+		if result.Expired {
+			return nil
+		}
+		notice, sendErr := b.SendMessageWithContext(requestScope(ctx).Context, msg.Chat.Id, fmt.Sprintf("验证码错误，还剩 %d 次机会。", result.RemainingAttempts), nil)
+		if sendErr == nil && notice != nil {
+			go deleteMessageLater(b, msg.Chat.Id, notice.MessageId, 5*time.Second)
+		}
+		return nil
+	}
+
+	if _, err := b.RestrictChatMemberWithContext(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id, fullPermissions(), &gotgbot.RestrictChatMemberOpts{UseIndependentChatPermissions: true}); err != nil {
+		log.Printf("restrictChatMember after captcha verify (chat=%d user=%d): %v", msg.Chat.Id, msg.From.Id, err)
+	}
+	if result.Challenge.MessageID != 0 {
+		_, _ = b.DeleteMessageWithContext(requestScope(ctx).Context, msg.Chat.Id, result.Challenge.MessageID, nil)
+	}
+	_ = a.clearUnverifiedKey(msg.Chat.Id, msg.From.Id)
+	_ = a.services.Admin.RecordVerifyEvent(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id, "verify_pass", "验证码验证通过")
+	cfg, _ := a.services.Admin.GetConfig(requestScope(ctx).Context, msg.Chat.Id)
+	return a.postWelcomeMessage(b, ctx, msg.Chat.Id, cfg, *msg.From)
 }
 
 func (a *App) sendMultiChoiceChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdminConfig, user gotgbot.User) error {
@@ -467,6 +594,7 @@ func (a *App) sendMultiChoiceChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg Cha
 		correctAnswer = strconv.Itoa(cfg.VerifyCorrectIndex)
 	}
 	if err := a.services.Admin.SetVerifyChallenge(requestScope(ctx).Context, cfg.ChatID, user.Id, VerifyChallenge{
+		Kind:       "multi_choice",
 		Answer:     correctAnswer,
 		MessageID:  messageID,
 		Attempts:   maxAttempts,
@@ -534,6 +662,7 @@ func (a *App) sendPollChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdminC
 		messageID = sent.MessageId
 	}
 	if err := a.services.Admin.SetVerifyChallenge(requestScope(ctx).Context, cfg.ChatID, user.Id, VerifyChallenge{
+		Kind:       "poll",
 		Answer:     strconv.Itoa(correctAnswerIdx),
 		MessageID:  messageID,
 		Attempts:   3,
@@ -598,6 +727,7 @@ func (a *App) sendMathChallenge(b *gotgbot.Bot, ctx *ext.Context, cfg ChatAdminC
 		messageID = sent.MessageId
 	}
 	if err := a.services.Admin.SetVerifyChallenge(requestScope(ctx).Context, cfg.ChatID, user.Id, VerifyChallenge{
+		Kind:       "math",
 		Answer:     strconv.Itoa(answer),
 		MessageID:  messageID,
 		Attempts:   maxAttempts,

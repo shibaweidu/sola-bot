@@ -158,8 +158,35 @@
             <el-button @click="openMute(currentUser)">禁言</el-button>
             <el-button v-if="currentUser?.status === 'muted'" @click="openUnmute(currentUser)">解除禁言</el-button>
           </div>
+          <div class="points-detail">
+            <div class="points-detail-head">
+              <div>
+                <strong>积分变动明细</strong>
+                <span>最近 20 条加分和扣分记录</span>
+              </div>
+              <el-button text size="small" :loading="pointLogsLoading" @click="currentUser && loadPointLogs(currentUser)">刷新</el-button>
+            </div>
+            <div class="points-summary">
+              <div><span>累计增加</span><strong class="points-positive">+{{ detailPointsAdded }}</strong></div>
+              <div><span>累计扣除</span><strong class="points-negative">-{{ detailPointsDeducted }}</strong></div>
+              <div><span>净变化</span><strong>{{ detailPointsNet >= 0 ? '+' : '' }}{{ detailPointsNet }}</strong></div>
+            </div>
+            <div v-if="pointLogsLoading" class="points-empty">正在加载积分明细...</div>
+            <div v-else-if="!pointLogs.length" class="points-empty">暂无积分变动记录</div>
+            <div v-else class="points-log-list">
+              <div v-for="log in pointLogs" :key="String(log.id)" class="points-log-row">
+                <div>
+                  <strong>{{ formatPointReason(log.reason) }}</strong>
+                  <span>{{ formatDateTime(log.created_at) }}</span>
+                </div>
+                <el-tag :type="log.delta >= 0 ? 'success' : 'danger'" effect="plain">
+                  {{ log.delta >= 0 ? '+' : '' }}{{ log.delta }} 分
+                </el-tag>
+              </div>
+            </div>
+          </div>
           <div class="detail-note">
-            详情抽屉用于先确认成员状态，再决定是否调分、提示或封禁，减少在表格里来回找信息。
+            详情抽屉用于确认成员状态和积分变动，再决定是否调分、提示或封禁。
           </div>
         </div>
       </template>
@@ -212,9 +239,9 @@ import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
 import { createBan, createMute, createUnmute } from "@/api/admin";
-import { updateUserPoints } from "@/api/points";
+import { fetchPointLogs, updateUserPoints } from "@/api/points";
 import { batchUsers, exportUsersCsv, fetchUsers } from "@/api/users";
-import type { ChatRecord, UserRecord } from "@/types/api";
+import type { ChatRecord, PointLogRecord, UserRecord } from "@/types/api";
 import { formatDateTime } from "@/utils/helpers";
 
 const route = useRoute();
@@ -239,6 +266,8 @@ const users = ref<UserRecord[]>([]);
 const chats = ref<ChatRecord[]>([]);
 const selectedRows = ref<UserRecord[]>([]);
 const currentUser = ref<UserRecord>();
+const pointLogs = ref<PointLogRecord[]>([]);
+const pointLogsLoading = ref(false);
 const adjustForm = reactive({ delta: 10, reason: "manual_adjust" });
 const batchForm = reactive({ delta: 10, reason: "batch_adjust" });
 
@@ -265,6 +294,10 @@ const statusCounts = computed(() => {
     { active: 0, muted: 0, banned: 0 } as Record<UserRecord["status"], number>,
   );
 });
+
+const detailPointsAdded = computed(() => pointLogs.value.reduce((sum, log) => sum + (log.delta > 0 ? log.delta : 0), 0));
+const detailPointsDeducted = computed(() => pointLogs.value.reduce((sum, log) => sum + (log.delta < 0 ? Math.abs(log.delta) : 0), 0));
+const detailPointsNet = computed(() => pointLogs.value.reduce((sum, log) => sum + log.delta, 0));
 
 watch(selectedChatId, (value) => {
   if (firstQueryValue(route.query.chat_id) === value) {
@@ -339,7 +372,38 @@ async function downloadCsv(): Promise<void> {
 
 function openDetails(user: UserRecord): void {
   currentUser.value = user;
+  pointLogs.value = [];
   detailVisible.value = true;
+  void loadPointLogs(user);
+}
+
+async function loadPointLogs(user: UserRecord): Promise<void> {
+  pointLogsLoading.value = true;
+  try {
+    const response = await fetchPointLogs(user.chat_id, user.id, { limit: 20 });
+    pointLogs.value = response.items;
+  } catch {
+    pointLogs.value = [];
+    ElMessage.error("积分明细加载失败");
+  } finally {
+    pointLogsLoading.value = false;
+  }
+}
+
+function formatPointReason(reason?: string | null): string {
+  const normalized = String(reason || "").trim();
+  if (!normalized) return "系统未记录原因";
+  const labels: Record<string, string> = {
+    sign: "每日签到",
+    lottery: "抽奖奖励",
+    "admin:bonus": "管理员加分",
+    "admin:deduct": "管理员扣分",
+  };
+  if (labels[normalized]) return labels[normalized];
+  if (normalized.startsWith("message:")) return `消息互动 · ${normalized.slice(8)}`;
+  if (normalized.startsWith("exchange_debit:")) return `积分兑换 · 扣除 ${normalized.slice(15)} 分`;
+  if (normalized.startsWith("invite_success:")) return "邀请成功奖励";
+  return normalized.replace(/_/g, " ").replace(/:/g, " · ");
 }
 
 function openBatchAdjust(): void {
@@ -628,6 +692,99 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.points-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--app-border);
+}
+
+.points-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.points-detail-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.points-detail-head span,
+.points-summary span,
+.points-log-row span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.points-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.points-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-2);
+}
+
+.points-positive {
+  color: var(--el-color-success);
+}
+
+.points-negative {
+  color: var(--el-color-danger);
+}
+
+.points-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.points-log-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.points-log-row:last-child {
+  border-bottom: 0;
+}
+
+.points-log-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.points-log-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.points-empty {
+  padding: 14px 0;
+  color: var(--app-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 .wide-control {
   width: 100%;
 }
@@ -638,6 +795,10 @@ onMounted(async () => {
   }
 
   .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .points-summary {
     grid-template-columns: 1fr;
   }
 }

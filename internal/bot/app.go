@@ -21,6 +21,7 @@ func New(services Services, options Options) *App {
 }
 
 func (a *App) Register(dispatcher *ext.Dispatcher) {
+	a.registerSubscriptionHandlers(dispatcher)
 	a.registerCoreHandlers(dispatcher)
 
 	if a.options.Features.Enabled("admin") {
@@ -32,17 +33,18 @@ func (a *App) Register(dispatcher *ext.Dispatcher) {
 	if a.options.Features.Enabled("verify") {
 		a.registerVerifyHandlers(dispatcher)
 	}
+	if a.options.Features.Enabled("auto_reply") {
+		a.registerAutoReplyHandlers(dispatcher)
+	}
 	if a.options.Features.Enabled("points") {
 		a.registerPointsHandlers(dispatcher)
 	}
 	if a.options.Features.Enabled("lottery") {
 		a.registerLotteryHandlers(dispatcher)
+		a.registerDailyLotteryHandlers(dispatcher)
 	}
 	if a.options.Features.Enabled("publish") {
 		a.registerPublishHandlers(dispatcher)
-	}
-	if a.options.Features.Enabled("auto_reply") {
-		a.registerAutoReplyHandlers(dispatcher)
 	}
 	a.registerKeywordHandlers(dispatcher)
 	a.registerTemplateHandlers(dispatcher)

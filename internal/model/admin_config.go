@@ -23,19 +23,27 @@ type WarnRecord struct {
 }
 
 type ChatAdminConfig struct {
-	ChatID             int64     `gorm:"primaryKey" json:"chat_id"`
-	WelcomeText        string    `gorm:"type:text;not null;default:'欢迎 {name} 加入！'" json:"welcome_text"`
-	VerifyEnabled      bool      `gorm:"not null;default:true" json:"verify_enabled"`
-	VerifyType         string    `gorm:"type:text;not null;default:'button'" json:"verify_type"`
-	VerifyTimeout      int       `gorm:"not null;default:60" json:"verify_timeout"`
-	VerifyQuestion     string    `gorm:"type:text;not null;default:''" json:"verify_question"`
-	VerifyOptions      string    `gorm:"type:text;not null;default:'[]'" json:"verify_options"`
-	VerifyCorrectIndex int       `gorm:"not null;default:-1" json:"verify_correct_index"`
-	VerifyWhitelist    string    `gorm:"type:text;not null;default:''" json:"verify_whitelist"`
-	VerifyDifficulty   string    `gorm:"type:text;not null;default:'medium'" json:"verify_difficulty"`
-	WarnLimit          int       `gorm:"not null;default:3" json:"warn_limit"`
-	RulesText          string    `gorm:"type:text;not null;default:''" json:"rules_text"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ChatID                      int64     `gorm:"primaryKey" json:"chat_id"`
+	WelcomeText                 string    `gorm:"type:text;not null;default:'欢迎 {name} 加入！'" json:"welcome_text"`
+	WelcomeEnabled              bool      `gorm:"not null;default:true" json:"welcome_enabled"`
+	WelcomeDeleteSecs           int       `gorm:"column:welcome_delete_seconds;not null;default:30" json:"welcome_delete_seconds"`
+	VerifyEnabled               bool      `gorm:"not null;default:true" json:"verify_enabled"`
+	VerifyType                  string    `gorm:"type:text;not null;default:'button'" json:"verify_type"`
+	VerifyTimeout               int       `gorm:"not null;default:60" json:"verify_timeout"`
+	VerifyQuestion              string    `gorm:"type:text;not null;default:''" json:"verify_question"`
+	VerifyOptions               string    `gorm:"type:text;not null;default:'[]'" json:"verify_options"`
+	VerifyCorrectIndex          int       `gorm:"not null;default:-1" json:"verify_correct_index"`
+	VerifyWhitelist             string    `gorm:"type:text;not null;default:''" json:"verify_whitelist"`
+	VerifyDifficulty            string    `gorm:"type:text;not null;default:'medium'" json:"verify_difficulty"`
+	WarnLimit                   int       `gorm:"not null;default:3" json:"warn_limit"`
+	ForceSubscribeEnabled       bool      `gorm:"not null;default:false" json:"force_subscribe_enabled"`
+	ForceSubscribeChannels      string    `gorm:"type:text;not null;default:''" json:"force_subscribe_channels"`
+	ForceSubscribeAction        string    `gorm:"type:text;not null;default:'mute'" json:"force_subscribe_action"`
+	ForceSubscribeMessage       string    `gorm:"type:text;not null;default:''" json:"force_subscribe_message"`
+	ForceSubscribeKickMessage   string    `gorm:"type:text;not null;default:''" json:"force_subscribe_kick_message"`
+	ForceSubscribeChannelLabels string    `gorm:"type:text;not null;default:''" json:"force_subscribe_channel_labels"`
+	RulesText                   string    `gorm:"type:text;not null;default:''" json:"rules_text"`
+	UpdatedAt                   time.Time `json:"updated_at"`
 }
 
 type SeenUser struct {

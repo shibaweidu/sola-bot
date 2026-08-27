@@ -475,6 +475,10 @@ func (s *Server) AdjustPointUser(c *gin.Context) {
 	if !s.ensureChatAllowed(c, chatID) {
 		return
 	}
+	if req.Delta > 999999 || req.Delta < -999999 {
+		writeError(c, http.StatusBadRequest, "delta must be between -999999 and 999999")
+		return
+	}
 	item, err := s.deps.Points.AdjustUser(c.Request.Context(), chatID, userID, req.Delta, req.Reason)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err.Error())

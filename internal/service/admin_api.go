@@ -15,38 +15,68 @@ import (
 )
 
 type adminAPIService struct {
-	admin    *AdminService
-	botToken string
+	admin      *AdminService
+	moderation *ModerationService
+	botToken   string
 }
 
 func (s *adminAPIService) GetConfig(ctx context.Context, chatID int64) (*api.ChatAdminConfig, error) {
 	if s == nil || s.admin == nil {
-		cfg := bot.ChatAdminConfig{ChatID: chatID, WelcomeText: defaultWelcomeText, VerifyEnabled: true, VerifyTimeout: 60, WarnLimit: 3}
-		return adminConfigToAPI(cfg), nil
+		cfg := defaultAdminConfig(chatID)
+		return adminConfigToAPI(cfg, defaultModerationConfig(chatID)), nil
 	}
 	cfg, err := s.admin.GetConfig(ctx, chatID)
 	if err != nil {
 		return nil, err
 	}
-	return adminConfigToAPI(cfg), nil
+	moderationCfg := defaultModerationConfig(chatID)
+	if s.moderation != nil {
+		moderationCfg, err = s.moderation.GetConfig(ctx, chatID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return adminConfigToAPI(cfg, moderationCfg), nil
 }
 
 func (s *adminAPIService) UpdateConfig(ctx context.Context, chatID int64, req api.ChatAdminConfigUpdateRequest) (*api.ChatAdminConfig, error) {
 	if s == nil || s.admin == nil {
-		cfg := bot.ChatAdminConfig{ChatID: chatID, WelcomeText: defaultWelcomeText, VerifyEnabled: true, VerifyTimeout: 60, WarnLimit: 3}
+		cfg := defaultAdminConfig(chatID)
 		applyAPIAdminPatch(&cfg, req)
-		return adminConfigToAPI(cfg), nil
+		moderationCfg := defaultModerationConfig(chatID)
+		applyModerationConfigPatch(&moderationCfg, moderationPatchFromAPI(req))
+		return adminConfigToAPI(cfg, moderationCfg), nil
 	}
 	cfg, err := s.admin.UpdateConfig(ctx, chatID, bot.ChatAdminConfigPatch{
-		WelcomeText:   req.WelcomeText,
-		VerifyEnabled: req.VerifyEnabled,
-		VerifyTimeout: req.VerifyTimeout,
-		WarnLimit:     req.WarnLimit,
+		WelcomeText:                 req.WelcomeText,
+		WelcomeEnabled:              req.WelcomeEnabled,
+		WelcomeDeleteSecs:           req.WelcomeDeleteSeconds,
+		VerifyEnabled:               req.VerifyEnabled,
+		VerifyType:                  req.VerifyType,
+		VerifyTimeout:               req.VerifyTimeout,
+		VerifyQuestion:              req.VerifyQuestion,
+		VerifyOptions:               req.VerifyOptions,
+		VerifyCorrectIndex:          req.VerifyCorrectIndex,
+		VerifyDifficulty:            req.VerifyDifficulty,
+		WarnLimit:                   req.WarnLimit,
+		ForceSubscribeEnabled:       req.ForceSubscribeEnabled,
+		ForceSubscribeChannels:      req.ForceSubscribeChannels,
+		ForceSubscribeAction:        req.ForceSubscribeAction,
+		ForceSubscribeMessage:       req.ForceSubscribeMessage,
+		ForceSubscribeKickMessage:   req.ForceSubscribeKickMessage,
+		ForceSubscribeChannelLabels: req.ForceSubscribeChannelLabels,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return adminConfigToAPI(cfg), nil
+	moderationCfg := defaultModerationConfig(chatID)
+	if s.moderation != nil {
+		moderationCfg, err = s.moderation.UpdateConfig(ctx, chatID, moderationPatchFromAPI(req))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return adminConfigToAPI(cfg, moderationCfg), nil
 }
 
 func (s *adminAPIService) ListBans(ctx context.Context, chatID int64, query api.CommonListQuery) ([]api.BanLog, error) {
@@ -296,13 +326,35 @@ func activeWarnCounts(ctx context.Context, db *gorm.DB, points []model.UserPoint
 	return out, nil
 }
 
-func adminConfigToAPI(cfg bot.ChatAdminConfig) *api.ChatAdminConfig {
+func adminConfigToAPI(cfg bot.ChatAdminConfig, moderationCfg model.ChatModerationConfig) *api.ChatAdminConfig {
 	return &api.ChatAdminConfig{
-		ChatID:        cfg.ChatID,
-		WelcomeText:   cfg.WelcomeText,
-		VerifyEnabled: cfg.VerifyEnabled,
-		VerifyTimeout: cfg.VerifyTimeout,
-		WarnLimit:     cfg.WarnLimit,
+		ChatID:                      cfg.ChatID,
+		WelcomeText:                 cfg.WelcomeText,
+		WelcomeEnabled:              cfg.WelcomeEnabled,
+		WelcomeDeleteSeconds:        cfg.WelcomeDeleteSecs,
+		VerifyEnabled:               cfg.VerifyEnabled,
+		VerifyType:                  cfg.VerifyType,
+		VerifyTimeout:               cfg.VerifyTimeout,
+		VerifyQuestion:              cfg.VerifyQuestion,
+		VerifyOptions:               cfg.VerifyOptions,
+		VerifyCorrectIndex:          cfg.VerifyCorrectIndex,
+		VerifyDifficulty:            cfg.VerifyDifficulty,
+		WarnLimit:                   cfg.WarnLimit,
+		ForceSubscribeEnabled:       cfg.ForceSubscribeEnabled,
+		ForceSubscribeChannels:      cfg.ForceSubscribeChannels,
+		ForceSubscribeAction:        cfg.ForceSubscribeAction,
+		ForceSubscribeMessage:       cfg.ForceSubscribeMessage,
+		ForceSubscribeKickMessage:   cfg.ForceSubscribeKickMessage,
+		ForceSubscribeChannelLabels: cfg.ForceSubscribeChannelLabels,
+		BlockLinks:                  moderationCfg.BlockLinks,
+		LinkWhitelist:               moderationCfg.LinkWhitelist,
+		LinkBlacklist:               moderationCfg.LinkBlacklist,
+		BlockForwards:               moderationCfg.BlockForwards,
+		BlockMedia:                  moderationCfg.BlockMedia,
+		KeywordFilterEnabled:        moderationCfg.KeywordFilterEnabled,
+		SpamScoreThreshold:          moderationCfg.SpamScoreThreshold,
+		AiFilterEnabled:             moderationCfg.AiFilterEnabled,
+		RestrictUnverified:          moderationCfg.RestrictUnverified,
 	}
 }
 
@@ -310,14 +362,76 @@ func applyAPIAdminPatch(cfg *bot.ChatAdminConfig, req api.ChatAdminConfigUpdateR
 	if req.WelcomeText != nil {
 		cfg.WelcomeText = *req.WelcomeText
 	}
+	if req.WelcomeEnabled != nil {
+		cfg.WelcomeEnabled = *req.WelcomeEnabled
+	}
+	if req.WelcomeDeleteSeconds != nil {
+		cfg.WelcomeDeleteSecs = *req.WelcomeDeleteSeconds
+	}
 	if req.VerifyEnabled != nil {
 		cfg.VerifyEnabled = *req.VerifyEnabled
+	}
+	if req.VerifyType != nil {
+		cfg.VerifyType = *req.VerifyType
 	}
 	if req.VerifyTimeout != nil {
 		cfg.VerifyTimeout = *req.VerifyTimeout
 	}
+	if req.VerifyQuestion != nil {
+		cfg.VerifyQuestion = *req.VerifyQuestion
+	}
+	if req.VerifyOptions != nil {
+		cfg.VerifyOptions = *req.VerifyOptions
+	}
+	if req.VerifyCorrectIndex != nil {
+		cfg.VerifyCorrectIndex = *req.VerifyCorrectIndex
+	}
+	if req.VerifyDifficulty != nil {
+		cfg.VerifyDifficulty = *req.VerifyDifficulty
+	}
 	if req.WarnLimit != nil {
 		cfg.WarnLimit = *req.WarnLimit
+	}
+	if req.ForceSubscribeEnabled != nil {
+		cfg.ForceSubscribeEnabled = *req.ForceSubscribeEnabled
+	}
+	if req.ForceSubscribeChannels != nil {
+		cfg.ForceSubscribeChannels = *req.ForceSubscribeChannels
+	}
+	if req.ForceSubscribeAction != nil {
+		cfg.ForceSubscribeAction = *req.ForceSubscribeAction
+	}
+	if req.ForceSubscribeMessage != nil {
+		cfg.ForceSubscribeMessage = *req.ForceSubscribeMessage
+	}
+	if req.ForceSubscribeKickMessage != nil {
+		cfg.ForceSubscribeKickMessage = *req.ForceSubscribeKickMessage
+	}
+	if req.ForceSubscribeChannelLabels != nil {
+		cfg.ForceSubscribeChannelLabels = *req.ForceSubscribeChannelLabels
+	}
+}
+
+func moderationPatchFromAPI(req api.ChatAdminConfigUpdateRequest) ModerationConfigPatch {
+	return ModerationConfigPatch{
+		VerifyEnabled:        req.VerifyEnabled,
+		VerifyType:           req.VerifyType,
+		VerifyTimeoutSeconds: req.VerifyTimeout,
+		VerifyQuestion:       req.VerifyQuestion,
+		VerifyOptions:        req.VerifyOptions,
+		VerifyCorrectIndex:   req.VerifyCorrectIndex,
+		WarnLimit:            req.WarnLimit,
+		BlockLinks:           req.BlockLinks,
+		LinkWhitelist:        req.LinkWhitelist,
+		LinkBlacklist:        req.LinkBlacklist,
+		BlockForwards:        req.BlockForwards,
+		BlockMedia:           req.BlockMedia,
+		KeywordFilterEnabled: req.KeywordFilterEnabled,
+		SpamScoreThreshold:   req.SpamScoreThreshold,
+		AiFilterEnabled:      req.AiFilterEnabled,
+		RestrictUnverified:   req.RestrictUnverified,
+		WelcomeText:          req.WelcomeText,
+		WelcomeDeleteSeconds: req.WelcomeDeleteSeconds,
 	}
 }
 

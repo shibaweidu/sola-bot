@@ -83,6 +83,13 @@ type Services struct {
 	AuditLog       AuditLogService
 	AiFilter       AiFilterService
 	Redis          RedisStateService
+	Menu           BotMenuService
+	PointCenter    PointCenterService
+	DailyLottery   DailyLotteryService
+}
+
+type BotMenuService interface {
+	List(ctx context.Context, role string) ([]model.BotMenuItem, error)
 }
 
 type Actor struct {
@@ -94,10 +101,11 @@ type Actor struct {
 }
 
 type ChatRef struct {
-	ID       int64
-	Type     string
-	Title    string
-	Username string
+	ID         int64
+	Type       string
+	Title      string
+	Username   string
+	InviteLink string
 }
 
 type RequestScope struct {
@@ -206,33 +214,195 @@ type PointAwardResult struct {
 	Reason  string
 }
 
+type PointCenterConfig struct {
+	ChatID               int64
+	InviteEnabled        bool
+	InviterReward        int
+	InviteeReward        int
+	SignEnabled          bool
+	SignReward           int
+	ExchangeEnabled      bool
+	ExchangeMinimum      int
+	ExchangeRate         int
+	ExchangeURL          string
+	ExchangeInstructions string
+	PurchaseURL          string
+	PurchaseText         string
+	ShopURL              string
+	ShopText             string
+	InviteText           string
+	InvitePageTemplate   string
+	InviteJoinURL        string
+	InviteJoinText       string
+	InviteSuccessText    string
+	PointsText           string
+	SignText             string
+	ExchangeText         string
+	RankText             string
+}
+
+type PointCenterDashboard struct {
+	CurrentPoints     int64
+	TodayInvitePoints int64
+	SuccessfulInvites int64
+	ExchangedAmount   int64
+	SignedToday       bool
+}
+
+type ReferralLinkResult struct {
+	Link      string
+	InviterID int64
+	ChatID    int64
+}
+
+type ReferralStartResult struct {
+	Accepted bool
+	Self     bool
+	Already  bool
+	ChatID   int64
+}
+
+type ReferralRewardResult struct {
+	Rewarded        bool
+	AlreadyRewarded bool
+	InviterID       int64
+	InviteeID       int64
+	ChatID          int64
+	InviterReward   int
+	InviteeReward   int
+}
+
+type SignResult struct {
+	Signed bool
+	Reward int
+}
+
+type ExchangeResult struct {
+	OrderID      string
+	Code         string
+	Amount       int
+	Points       int
+	RedeemURL    string
+	Instructions string
+}
+
+type InviteRankEntry struct {
+	UserID int64
+	Count  int64
+}
+
+type PointCenterService interface {
+	GetConfig(ctx context.Context, chatID int64) (PointCenterConfig, error)
+	UpdateConfig(ctx context.Context, config PointCenterConfig) (PointCenterConfig, error)
+	EnsureReferralLink(ctx context.Context, botID, chatID, inviterID int64, botUsername string) (ReferralLinkResult, error)
+	RegisterReferralStart(ctx context.Context, botID int64, code string, inviteeID int64) (ReferralStartResult, error)
+	ActivateReferral(ctx context.Context, botID, chatID, inviteeID int64) (ReferralRewardResult, error)
+	Sign(ctx context.Context, chatID, userID int64) (SignResult, error)
+	Dashboard(ctx context.Context, chatID, userID int64) (PointCenterDashboard, error)
+	Exchange(ctx context.Context, chatID, userID int64, points int) (ExchangeResult, error)
+	TopInviters(ctx context.Context, chatID int64, limit int) ([]InviteRankEntry, error)
+}
+
+type DailyLotteryConfig struct {
+	ChatID          int64
+	Enabled         bool
+	DailyAttempts   int
+	CostPoints      int
+	GuaranteeOnLast bool
+}
+
+type DailyLotteryPrize struct {
+	ID            uint64
+	ChatID        int64
+	Amount        int
+	Weight        int
+	Enabled       bool
+	AvailableCode int
+}
+
+type DailyLotteryStatus struct {
+	ChatID        int64
+	UserID        int64
+	DrawDate      string
+	DailyAttempts int
+	UsedAttempts  int
+	Remaining     int
+	CostPoints    int
+	Enabled       bool
+	Prizes        []DailyLotteryPrize
+}
+
+type DailyLotteryDrawResult struct {
+	ChatID     int64
+	UserID     int64
+	DrawDate   string
+	AttemptNo  int
+	Remaining  int
+	Result     string
+	Amount     int
+	Code       string
+	RedeemURL  string
+	CostPoints int
+	Guaranteed bool
+}
+
+type DailyLotteryAttemptRecord struct {
+	DrawDate   string
+	AttemptNo  int
+	Result     string
+	Amount     int
+	CostPoints int
+}
+
+type DailyLotteryService interface {
+	Status(ctx context.Context, chatID, userID int64) (DailyLotteryStatus, error)
+	Draw(ctx context.Context, chatID, userID int64) (DailyLotteryDrawResult, error)
+	History(ctx context.Context, chatID, userID int64, limit int) ([]DailyLotteryAttemptRecord, error)
+}
+
 type ChatAdminConfig struct {
-	ChatID             int64
-	WelcomeText        string
-	VerifyEnabled      bool
-	VerifyType         string
-	VerifyTimeout      int
-	WarnLimit          int
-	VerifyQuestion     string
-	VerifyOptions      string
-	VerifyCorrectIndex int
-	VerifyWhitelist    string
-	VerifyDifficulty   string
-	RulesText          string
+	ChatID                      int64
+	WelcomeText                 string
+	WelcomeEnabled              bool
+	WelcomeDeleteSecs           int
+	VerifyEnabled               bool
+	VerifyType                  string
+	VerifyTimeout               int
+	WarnLimit                   int
+	VerifyQuestion              string
+	VerifyOptions               string
+	VerifyCorrectIndex          int
+	VerifyWhitelist             string
+	VerifyDifficulty            string
+	ForceSubscribeEnabled       bool
+	ForceSubscribeChannels      string
+	ForceSubscribeAction        string
+	ForceSubscribeMessage       string
+	ForceSubscribeKickMessage   string
+	ForceSubscribeChannelLabels string
+	RulesText                   string
 }
 
 type ChatAdminConfigPatch struct {
-	WelcomeText        *string
-	VerifyEnabled      *bool
-	VerifyType         *string
-	VerifyTimeout      *int
-	WarnLimit          *int
-	VerifyQuestion     *string
-	VerifyOptions      *string
-	VerifyCorrectIndex *int
-	VerifyWhitelist    *string
-	VerifyDifficulty   *string
-	RulesText          *string
+	WelcomeText                 *string
+	WelcomeEnabled              *bool
+	WelcomeDeleteSecs           *int
+	VerifyEnabled               *bool
+	VerifyType                  *string
+	VerifyTimeout               *int
+	WarnLimit                   *int
+	VerifyQuestion              *string
+	VerifyOptions               *string
+	VerifyCorrectIndex          *int
+	VerifyWhitelist             *string
+	VerifyDifficulty            *string
+	ForceSubscribeEnabled       *bool
+	ForceSubscribeChannels      *string
+	ForceSubscribeAction        *string
+	ForceSubscribeMessage       *string
+	ForceSubscribeKickMessage   *string
+	ForceSubscribeChannelLabels *string
+	RulesText                   *string
 }
 
 type BanLog struct {
@@ -277,6 +447,7 @@ type AdminService interface {
 }
 
 type VerifyChallenge struct {
+	Kind       string
 	Answer     string
 	MessageID  int64
 	Attempts   int

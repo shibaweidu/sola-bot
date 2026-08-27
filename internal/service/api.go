@@ -27,27 +27,33 @@ func NewAPIDependencies(cfg config.Config, st *store.Store) api.Dependencies {
 	levels := NewLevelService(st)
 	moderation := NewModerationService(st)
 	autoReplies := NewAutoReplyService(st)
+	botMenu := NewBotMenuService(st, cfg.Bot.Token)
+	pointCenter := NewPointCenterService(st, cfg.Bot.Token)
+	dailyLottery := NewDailyLotteryService(st)
 	return api.Dependencies{
-		Auth:             admin,
-		BotConfig:        &botConfigService{},
-		Chats:            &chatBindingService{store: st},
-		ChatPointConfigs: &chatPointConfigService{points: NewPointsService(st)},
-		Points:           &pointsAPIService{points: NewPointsService(st)},
-		Admin:            &adminAPIService{admin: NewAdminService(st, st.Redis), botToken: cfg.Bot.Token},
-		Lotteries:        &lotteryAPIService{lotteries: NewLotteryService(st), store: st},
-		Levels:           &levelAPIService{levels: levels},
-		AdminViolations:  &adminViolationAPIService{moderation: moderation},
-		Keywords:         &keywordAPIService{moderation: moderation},
-		AutoReplies:      &autoReplyAPIService{service: autoReplies},
-		Backups:          &backupAPIService{backup: NewBackupService(st)},
-		Templates:        &templateAPIService{templates: NewMessageTemplateService(st)},
-		InviteLinks:      &inviteLinkAPIService{inviteLinks: NewInviteLinkService(st, cfg.Bot.Token)},
-		Posts:            &postAPIService{store: st},
-		Schedules:        &scheduleAPIService{store: st},
-		Stats:            &statsAPIService{store: st},
-		Users:            &userAPIService{store: st},
-		AuditLogs:        &auditLogAPIService{store: st},
-		SystemSettings:   &systemSettingsService{store: st, cfg: cfg},
+		Auth:                  admin,
+		BotConfig:             &botConfigService{},
+		Chats:                 &chatBindingService{store: st},
+		ChatPointConfigs:      &chatPointConfigService{points: NewPointsService(st)},
+		Points:                &pointsAPIService{points: NewPointsService(st)},
+		Admin:                 &adminAPIService{admin: NewAdminService(st, st.Redis), moderation: moderation, botToken: cfg.Bot.Token},
+		Lotteries:             &lotteryAPIService{lotteries: NewLotteryService(st), store: st},
+		Levels:                &levelAPIService{levels: levels},
+		AdminViolations:       &adminViolationAPIService{moderation: moderation},
+		Keywords:              &keywordAPIService{moderation: moderation},
+		AutoReplies:           &autoReplyAPIService{service: autoReplies},
+		Backups:               &backupAPIService{backup: NewBackupService(st)},
+		Templates:             &templateAPIService{templates: NewMessageTemplateService(st)},
+		InviteLinks:           &inviteLinkAPIService{inviteLinks: NewInviteLinkService(st, cfg.Bot.Token)},
+		Posts:                 &postAPIService{store: st},
+		Schedules:             &scheduleAPIService{store: st},
+		Stats:                 &statsAPIService{store: st},
+		Users:                 &userAPIService{store: st},
+		AuditLogs:             &auditLogAPIService{store: st},
+		SystemSettings:        &systemSettingsService{store: st, cfg: cfg},
+		BotMenu:               &botMenuAPIService{service: botMenu},
+		PointCenter:           &pointCenterAPIService{service: pointCenter},
+		DailyLottery:          &dailyLotteryAPIService{service: dailyLottery},
 		Redis:                 st.Redis,
 		AllowedOriginSet:      cfg.App.AllowedOrigins,
 		EnableSwagger:         cfg.App.EnableSwagger,
@@ -305,6 +311,7 @@ func (s *chatBindingService) List(ctx context.Context, query api.CommonListQuery
 		return []api.ChatBinding{}, nil
 	}
 	db := s.store.DB.WithContext(ctx).Model(&model.TelegramChat{})
+	db = db.Where("status = ?", "active")
 	if strings.TrimSpace(query.OwnerUserID) != "" {
 		if ownerID, err := uuid.Parse(strings.TrimSpace(query.OwnerUserID)); err == nil {
 			db = db.Where("owner_user_id = ?", ownerID)

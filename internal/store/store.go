@@ -52,5 +52,14 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 		&model.AuditLog{},
 		&model.SeenUser{},
 		&model.SystemSetting{},
+		&model.PointCenterConfig{},
+		&model.ReferralCode{},
+		&model.Referral{},
+		&model.DailySignRecord{},
+		&model.ExchangeCode{},
+		&model.ExchangeOrder{},
+		&model.DailyLotteryConfig{},
+		&model.DailyLotteryPrize{},
+		&model.DailyLotteryAttempt{},
 	)
 }

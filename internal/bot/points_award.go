@@ -43,10 +43,6 @@ func (a *App) handleMessagePoints(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	if err := a.handleAutoReply(b, ctx); err != nil {
-		log.Printf("auto reply error: %v", err)
-	}
-
 	if a.services.Points == nil {
 		return ext.ContinueGroups
 	}
@@ -156,6 +152,23 @@ func usernameOrID(user *gotgbot.User) string {
 }
 
 func (a *App) awardSign(b *gotgbot.Bot, ctx *ext.Context) error {
+	if err := a.rememberGroupTarget(ctx); err != nil {
+		return err
+	}
+	if a.services.PointCenter != nil && ctx != nil && ctx.Message != nil && ctx.Message.From != nil {
+		msg := ctx.Message
+		if msg.Chat.Type == "group" || msg.Chat.Type == "supergroup" {
+			result, err := a.services.PointCenter.Sign(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id)
+			if err != nil {
+				return sendText(b, ctx, err.Error(), nil)
+			}
+			summary := ""
+			if a.services.Points != nil {
+				summary, _ = a.services.Points.GetSummary(requestScope(ctx).Context, msg.Chat.Id, msg.From.Id)
+			}
+			return sendText(b, ctx, fmt.Sprintf("签到成功，+%d 积分。\n%s", result.Reward, summary), nil)
+		}
+	}
 	if a.services.Points == nil || ctx == nil || ctx.Message == nil {
 		return sendText(b, ctx, "积分服务尚未接入。", nil)
 	}
@@ -184,6 +197,43 @@ func (a *App) awardSign(b *gotgbot.Bot, ctx *ext.Context) error {
 		return err
 	}
 	return a.replySignResult(b, ctx, result)
+}
+
+func (a *App) awardSignForChat(b *gotgbot.Bot, ctx *ext.Context, chatID int64) error {
+	if a.services.PointCenter != nil {
+		result, err := a.services.PointCenter.Sign(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID)
+		if err != nil {
+			return sendText(b, ctx, err.Error(), nil)
+		}
+		summary := ""
+		if a.services.Points != nil {
+			summary, _ = a.services.Points.GetSummary(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID)
+		}
+		return sendText(b, ctx, fmt.Sprintf("签到成功，+%d 积分。\n%s", result.Reward, summary), nil)
+	}
+	if a.services.Points == nil {
+		return sendText(b, ctx, "积分服务尚未接入。", nil)
+	}
+	scope := requestScope(ctx)
+	result, err := a.services.Points.AwardMessage(scope.Context, PointAwardRequest{
+		ChatID: chatID, UserID: scope.Actor.ID, MessageID: 0, MessageType: "text",
+		CooldownScope: "sign", ReasonPrefix: "sign", Username: scope.Actor.Username,
+		DisplayName: scope.Actor.FirstName, ChatType: "group", IsCommand: false,
+	})
+	if err != nil {
+		return err
+	}
+	if result.Awarded {
+		summary, summaryErr := a.services.Points.GetSummary(scope.Context, chatID, scope.Actor.ID)
+		if summaryErr != nil {
+			return sendText(b, ctx, fmt.Sprintf("签到成功，+%d 积分。", result.Points), nil)
+		}
+		return sendText(b, ctx, fmt.Sprintf("签到成功，+%d 积分。\n%s", result.Points, summary), nil)
+	}
+	if result.Reason == "cooldown" {
+		return sendText(b, ctx, "签到太频繁了，稍后再试。", nil)
+	}
+	return sendText(b, ctx, "签到未计分："+result.Reason, nil)
 }
 
 func (a *App) replySignResult(b *gotgbot.Bot, ctx *ext.Context, result PointAwardResult) error {

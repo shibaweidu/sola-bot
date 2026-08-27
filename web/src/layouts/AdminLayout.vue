@@ -155,6 +155,7 @@ const navSections: NavSection[] = [
       { path: "/chats", label: "群组会话", description: "查看已接入的群组与频道列表", icon: MessageBox },
       { path: "/invite-links", label: "邀请追踪", description: "跟踪邀请链接与成员转化情况", icon: Files },
       { path: "/bots", label: "机器人管理", description: "查看机器人令牌、状态与实例配置", icon: Cpu },
+      { path: "/bot-menu", label: "机器人菜单", description: "编辑私聊普通用户与管理员菜单", icon: Menu },
     ],
   },
   {
@@ -162,6 +163,7 @@ const navSections: NavSection[] = [
     label: "规则自动化",
     items: [
       { path: "/points/config", label: "积分规则", description: "配置奖励、扣分与排行榜策略", icon: Coin },
+      { path: "/point-center", label: "积分中心", description: "管理邀请、签到、兑换码与商城入口", icon: Coin },
       { path: "/levels", label: "积分等级", description: "调整成长等级、门槛与展示头衔", icon: Trophy },
       { path: "/keywords", label: "关键词规则", description: "维护词库、匹配策略与触发方式", icon: ChatDotRound },
       { path: "/auto-replies", label: "自动回复", description: "配置关键词与场景自动回复", icon: MessageBox },

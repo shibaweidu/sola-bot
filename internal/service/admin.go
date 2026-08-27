@@ -18,6 +18,8 @@ import (
 )
 
 const defaultWelcomeText = "欢迎 {name} 加入！"
+const defaultForceSubscribeMessage = "{name}，请先订阅指定频道后才能发言。完成后点击“我已订阅，检查状态”。\n待订阅：{channels}"
+const defaultForceSubscribeKickMessage = "{name} 未完成必需频道订阅，已移出群组。\n待订阅：{channels}"
 const verifyPendingSetKey = "verify:pending"
 
 type VerifyTimeout struct {
@@ -42,17 +44,22 @@ func (s *AdminService) GetConfig(ctx context.Context, chatID int64) (bot.ChatAdm
 	}
 
 	cfg := model.ChatAdminConfig{
-		ChatID:             chatID,
-		WelcomeText:        defaultWelcomeText,
-		VerifyEnabled:      true,
-		VerifyType:         "button",
-		VerifyTimeout:      60,
-		WarnLimit:          3,
-		VerifyQuestion:     "",
-		VerifyOptions:      "[]",
-		VerifyCorrectIndex: -1,
-		VerifyWhitelist:    "",
-		VerifyDifficulty:   "medium",
+		ChatID:                    chatID,
+		WelcomeText:               defaultWelcomeText,
+		WelcomeEnabled:            true,
+		WelcomeDeleteSecs:         30,
+		VerifyEnabled:             true,
+		VerifyType:                "button",
+		VerifyTimeout:             60,
+		WarnLimit:                 3,
+		VerifyQuestion:            "",
+		VerifyOptions:             "[]",
+		VerifyCorrectIndex:        -1,
+		VerifyWhitelist:           "",
+		VerifyDifficulty:          "medium",
+		ForceSubscribeAction:      "mute",
+		ForceSubscribeMessage:     defaultForceSubscribeMessage,
+		ForceSubscribeKickMessage: defaultForceSubscribeKickMessage,
 	}
 	db := s.store.DB.WithContext(ctx)
 	err := db.Clauses(clause.OnConflict{
@@ -83,18 +90,26 @@ func (s *AdminService) UpdateConfig(ctx context.Context, chatID int64, patch bot
 	applyAdminConfigPatch(&current, patch)
 
 	updates := map[string]any{
-		"welcome_text":         current.WelcomeText,
-		"verify_enabled":       current.VerifyEnabled,
-		"verify_type":          current.VerifyType,
-		"verify_timeout":       current.VerifyTimeout,
-		"warn_limit":           current.WarnLimit,
-		"verify_question":      current.VerifyQuestion,
-		"verify_options":       current.VerifyOptions,
-		"verify_correct_index": current.VerifyCorrectIndex,
-		"verify_whitelist":     current.VerifyWhitelist,
-		"verify_difficulty":    current.VerifyDifficulty,
-		"rules_text":           current.RulesText,
-		"updated_at":           time.Now(),
+		"welcome_text":                   current.WelcomeText,
+		"welcome_enabled":                current.WelcomeEnabled,
+		"welcome_delete_seconds":         current.WelcomeDeleteSecs,
+		"verify_enabled":                 current.VerifyEnabled,
+		"verify_type":                    current.VerifyType,
+		"verify_timeout":                 current.VerifyTimeout,
+		"warn_limit":                     current.WarnLimit,
+		"verify_question":                current.VerifyQuestion,
+		"verify_options":                 current.VerifyOptions,
+		"verify_correct_index":           current.VerifyCorrectIndex,
+		"verify_whitelist":               current.VerifyWhitelist,
+		"verify_difficulty":              current.VerifyDifficulty,
+		"force_subscribe_enabled":        current.ForceSubscribeEnabled,
+		"force_subscribe_channels":       current.ForceSubscribeChannels,
+		"force_subscribe_action":         current.ForceSubscribeAction,
+		"force_subscribe_message":        current.ForceSubscribeMessage,
+		"force_subscribe_kick_message":   current.ForceSubscribeKickMessage,
+		"force_subscribe_channel_labels": current.ForceSubscribeChannelLabels,
+		"rules_text":                     current.RulesText,
+		"updated_at":                     time.Now(),
 	}
 	err = s.store.DB.WithContext(ctx).Model(&model.ChatAdminConfig{}).
 		Where("chat_id = ?", chatID).
@@ -436,23 +451,31 @@ func (s *AdminService) GetVerifyStats(ctx context.Context, chatID int64) (bot.Ve
 
 func defaultAdminConfig(chatID int64) bot.ChatAdminConfig {
 	return bot.ChatAdminConfig{
-		ChatID:             chatID,
-		WelcomeText:        defaultWelcomeText,
-		VerifyEnabled:      true,
-		VerifyType:         "button",
-		VerifyTimeout:      60,
-		WarnLimit:          3,
-		VerifyQuestion:     "",
-		VerifyOptions:      "[]",
-		VerifyCorrectIndex: -1,
-		VerifyWhitelist:    "",
-		VerifyDifficulty:   "medium",
+		ChatID:                    chatID,
+		WelcomeText:               defaultWelcomeText,
+		WelcomeEnabled:            true,
+		WelcomeDeleteSecs:         30,
+		VerifyEnabled:             true,
+		VerifyType:                "button",
+		VerifyTimeout:             60,
+		WarnLimit:                 3,
+		VerifyQuestion:            "",
+		VerifyOptions:             "[]",
+		VerifyCorrectIndex:        -1,
+		VerifyWhitelist:           "",
+		VerifyDifficulty:          "medium",
+		ForceSubscribeAction:      "mute",
+		ForceSubscribeMessage:     defaultForceSubscribeMessage,
+		ForceSubscribeKickMessage: defaultForceSubscribeKickMessage,
 	}
 }
 
 func normalizeAdminConfig(cfg *model.ChatAdminConfig) {
 	if cfg.WelcomeText == "" {
 		cfg.WelcomeText = defaultWelcomeText
+	}
+	if cfg.WelcomeDeleteSecs < 0 {
+		cfg.WelcomeDeleteSecs = 0
 	}
 	if cfg.VerifyTimeout <= 0 {
 		cfg.VerifyTimeout = 60
@@ -462,6 +485,16 @@ func normalizeAdminConfig(cfg *model.ChatAdminConfig) {
 	}
 	if strings.TrimSpace(cfg.VerifyType) == "" {
 		cfg.VerifyType = "button"
+	}
+	cfg.ForceSubscribeAction = strings.TrimSpace(cfg.ForceSubscribeAction)
+	if cfg.ForceSubscribeAction != "kick" {
+		cfg.ForceSubscribeAction = "mute"
+	}
+	if strings.TrimSpace(cfg.ForceSubscribeMessage) == "" {
+		cfg.ForceSubscribeMessage = defaultForceSubscribeMessage
+	}
+	if strings.TrimSpace(cfg.ForceSubscribeKickMessage) == "" {
+		cfg.ForceSubscribeKickMessage = defaultForceSubscribeKickMessage
 	}
 	if cfg.VerifyOptions == "" {
 		cfg.VerifyOptions = "[]"
@@ -480,6 +513,12 @@ func normalizeAdminConfig(cfg *model.ChatAdminConfig) {
 func applyAdminConfigPatch(cfg *bot.ChatAdminConfig, patch bot.ChatAdminConfigPatch) {
 	if patch.WelcomeText != nil {
 		cfg.WelcomeText = *patch.WelcomeText
+	}
+	if patch.WelcomeEnabled != nil {
+		cfg.WelcomeEnabled = *patch.WelcomeEnabled
+	}
+	if patch.WelcomeDeleteSecs != nil && *patch.WelcomeDeleteSecs >= 0 {
+		cfg.WelcomeDeleteSecs = *patch.WelcomeDeleteSecs
 	}
 	if patch.VerifyEnabled != nil {
 		cfg.VerifyEnabled = *patch.VerifyEnabled
@@ -508,6 +547,24 @@ func applyAdminConfigPatch(cfg *bot.ChatAdminConfig, patch bot.ChatAdminConfigPa
 	if patch.VerifyDifficulty != nil {
 		cfg.VerifyDifficulty = strings.TrimSpace(*patch.VerifyDifficulty)
 	}
+	if patch.ForceSubscribeEnabled != nil {
+		cfg.ForceSubscribeEnabled = *patch.ForceSubscribeEnabled
+	}
+	if patch.ForceSubscribeChannels != nil {
+		cfg.ForceSubscribeChannels = strings.TrimSpace(*patch.ForceSubscribeChannels)
+	}
+	if patch.ForceSubscribeAction != nil {
+		cfg.ForceSubscribeAction = strings.TrimSpace(*patch.ForceSubscribeAction)
+	}
+	if patch.ForceSubscribeMessage != nil {
+		cfg.ForceSubscribeMessage = strings.TrimSpace(*patch.ForceSubscribeMessage)
+	}
+	if patch.ForceSubscribeKickMessage != nil {
+		cfg.ForceSubscribeKickMessage = strings.TrimSpace(*patch.ForceSubscribeKickMessage)
+	}
+	if patch.ForceSubscribeChannelLabels != nil {
+		cfg.ForceSubscribeChannelLabels = strings.TrimSpace(*patch.ForceSubscribeChannelLabels)
+	}
 	if patch.RulesText != nil {
 		cfg.RulesText = *patch.RulesText
 	}
@@ -515,18 +572,26 @@ func applyAdminConfigPatch(cfg *bot.ChatAdminConfig, patch bot.ChatAdminConfigPa
 
 func modelAdminConfigToBot(cfg model.ChatAdminConfig) bot.ChatAdminConfig {
 	return bot.ChatAdminConfig{
-		ChatID:             cfg.ChatID,
-		WelcomeText:        cfg.WelcomeText,
-		VerifyEnabled:      cfg.VerifyEnabled,
-		VerifyType:         cfg.VerifyType,
-		VerifyTimeout:      cfg.VerifyTimeout,
-		WarnLimit:          cfg.WarnLimit,
-		VerifyQuestion:     cfg.VerifyQuestion,
-		VerifyOptions:      cfg.VerifyOptions,
-		VerifyCorrectIndex: cfg.VerifyCorrectIndex,
-		VerifyWhitelist:    cfg.VerifyWhitelist,
-		VerifyDifficulty:   cfg.VerifyDifficulty,
-		RulesText:          cfg.RulesText,
+		ChatID:                      cfg.ChatID,
+		WelcomeText:                 cfg.WelcomeText,
+		WelcomeEnabled:              cfg.WelcomeEnabled,
+		WelcomeDeleteSecs:           cfg.WelcomeDeleteSecs,
+		VerifyEnabled:               cfg.VerifyEnabled,
+		VerifyType:                  cfg.VerifyType,
+		VerifyTimeout:               cfg.VerifyTimeout,
+		WarnLimit:                   cfg.WarnLimit,
+		VerifyQuestion:              cfg.VerifyQuestion,
+		VerifyOptions:               cfg.VerifyOptions,
+		VerifyCorrectIndex:          cfg.VerifyCorrectIndex,
+		VerifyWhitelist:             cfg.VerifyWhitelist,
+		VerifyDifficulty:            cfg.VerifyDifficulty,
+		ForceSubscribeEnabled:       cfg.ForceSubscribeEnabled,
+		ForceSubscribeChannels:      cfg.ForceSubscribeChannels,
+		ForceSubscribeAction:        cfg.ForceSubscribeAction,
+		ForceSubscribeMessage:       cfg.ForceSubscribeMessage,
+		ForceSubscribeKickMessage:   cfg.ForceSubscribeKickMessage,
+		ForceSubscribeChannelLabels: cfg.ForceSubscribeChannelLabels,
+		RulesText:                   cfg.RulesText,
 	}
 }
 

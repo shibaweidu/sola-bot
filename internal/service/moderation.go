@@ -727,6 +727,9 @@ func applyModerationConfigPatch(cfg *model.ChatModerationConfig, patch Moderatio
 	if patch.SpamScoreThreshold != nil {
 		cfg.SpamScoreThreshold = nonNegative(*patch.SpamScoreThreshold)
 	}
+	if patch.AiFilterEnabled != nil {
+		cfg.AiFilterEnabled = *patch.AiFilterEnabled
+	}
 	if patch.RestrictUnverified != nil {
 		cfg.RestrictUnverified = *patch.RestrictUnverified
 	}

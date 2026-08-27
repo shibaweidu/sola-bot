@@ -50,7 +50,38 @@ func (a *App) routePrivateCallback(b *gotgbot.Bot, ctx *ext.Context, payload Cal
 		if err := a.setSelectedChatID(scope.Context, scope.Actor.ID, chatID); err != nil {
 			return err
 		}
-		return a.showPrivateConsole(b, ctx)
+		if err := a.showPrivateConsole(b, ctx); err != nil {
+			return err
+		}
+		return a.syncPrivateKeyboard(b, ctx)
+	case "select_user":
+		chatID, err := strconv.ParseInt(payload.Resource, 10, 64)
+		if err != nil || chatID == 0 {
+			return answerCallback(b, ctx, "目标聊天无效")
+		}
+		chats, err := a.listPrivateUserChats(ctx)
+		if err != nil {
+			return err
+		}
+		var selected api.ChatBinding
+		found := false
+		for _, chat := range chats {
+			if chat.ChatID == chatID {
+				selected = chat
+				found = true
+				break
+			}
+		}
+		if !found {
+			return answerCallback(b, ctx, "该群组当前不可用")
+		}
+		if err := a.setSelectedChatID(requestScope(ctx).Context, requestScope(ctx).Actor.ID, chatID); err != nil {
+			return err
+		}
+		if err := respondText(b, ctx, fmt.Sprintf("已选择：%s\n现在可以使用积分菜单。", chatTitle(selected)), nil); err != nil {
+			return err
+		}
+		return a.syncPrivateKeyboard(b, ctx)
 	case "console":
 		return a.showPrivateConsole(b, ctx)
 	case "posts":
@@ -91,6 +122,10 @@ func (a *App) showPrivateHome(b *gotgbot.Bot, ctx *ext.Context) error {
 	if err != nil {
 		return err
 	}
+	userChats, err := a.listPrivateUserChats(ctx)
+	if err != nil {
+		return err
+	}
 	text := strings.Join([]string{
 		"🏠 运营控制台",
 		"━━━━━━━━━━",
@@ -98,16 +133,41 @@ func (a *App) showPrivateHome(b *gotgbot.Bot, ctx *ext.Context) error {
 		"在私聊里选择一个已绑定的群组或频道，就能像面板一样继续操作。",
 		"支持切换目标、创建抽奖、查看积分、定时发帖和群管入口。",
 	}, "\n")
+	role, roleErr := a.privateMenuRole(ctx)
+	if roleErr != nil {
+		return roleErr
+	}
 	if len(chats) == 0 {
-		text += "\n\n当前还没有可管理的目标，请先把 Bot 加进群组或频道，并在对应聊天里发送 /bind。"
-		return respondText(b, ctx, text, privateHomeMarkup(false, false))
+		if len(userChats) > 0 {
+			text += fmt.Sprintf("\n\n当前可用积分群组：%d", len(userChats))
+			if chat, ok := a.currentPrivateChat(scope.Context, userChats, scope.Actor.ID); ok {
+				text += "\n当前目标：" + chatTypeLabel(chat.ChatType) + " · " + chatTitle(chat)
+			}
+			return a.respondPrivateHome(b, ctx, text, role)
+		}
+		text += "\n\n当前还没有可用的积分群组。请先通过目标群组的邀请链接启动机器人，或在群内点击积分菜单。"
+		return a.respondPrivateHome(b, ctx, text, role)
 	}
 	selectedLabel := "未选择"
 	if chat, ok := a.currentPrivateChat(scope.Context, chats, scope.Actor.ID); ok {
 		selectedLabel = chatTypeLabel(chat.ChatType) + " · " + chatTitle(chat)
 	}
 	text += fmt.Sprintf("\n\n已绑定目标：%d\n当前目标：%s", len(chats), selectedLabel)
-	return respondText(b, ctx, text, privateHomeMarkup(true, selectedLabel != "未选择"))
+	return a.respondPrivateHome(b, ctx, text, role)
+}
+
+func (a *App) respondPrivateHome(b *gotgbot.Bot, ctx *ext.Context, text, role string) error {
+	opts, err := a.privateKeyboardOpts(ctx, role)
+	if err != nil {
+		return err
+	}
+	if ctx != nil && ctx.CallbackQuery != nil {
+		if err := respondText(b, ctx, text, nil); err != nil {
+			return err
+		}
+		return a.syncPrivateKeyboard(b, ctx)
+	}
+	return sendText(b, ctx, text, opts)
 }
 
 func (a *App) showPrivateChatList(b *gotgbot.Bot, ctx *ext.Context) error {
@@ -135,6 +195,50 @@ func (a *App) showPrivateChatList(b *gotgbot.Bot, ctx *ext.Context) error {
 	rows = append(rows, []gotgbot.InlineKeyboardButton{{Text: "🔙 返回首页", CallbackData: CallbackData("private", "home")}})
 	text := "🎯 选择目标\n━━━━━━━━━━\n\n请选择当前要管理的目标。\n\n后续所有按钮都会针对你选中的群组或频道执行。"
 	return respondText(b, ctx, text, &gotgbot.SendMessageOpts{ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}})
+}
+
+// listPrivateUserChats returns active bot targets for public group-scoped features.
+// It does not grant management access; admin actions still verify permissions.
+func (a *App) listPrivateUserChats(ctx *ext.Context) ([]api.ChatBinding, error) {
+	scope := requestScope(ctx)
+	if a.services.ChatBindings == nil {
+		return []api.ChatBinding{}, nil
+	}
+	chats, err := a.services.ChatBindings.List(scope.Context, api.CommonListQuery{Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]api.ChatBinding, 0, len(chats))
+	for _, chat := range chats {
+		if isManagedChatType(chat.ChatType) {
+			filtered = append(filtered, chat)
+		}
+	}
+	return filtered, nil
+}
+
+func (a *App) showPrivateUserChatList(b *gotgbot.Bot, ctx *ext.Context) error {
+	chats, err := a.listPrivateUserChats(ctx)
+	if err != nil {
+		return err
+	}
+	if len(chats) == 0 {
+		return respondText(b, ctx, "当前还没有可用的积分群组。请先通过目标群组的邀请链接启动机器人，或在群内点击积分菜单。", nil)
+	}
+	if len(chats) == 1 {
+		if err := a.setSelectedChatID(requestScope(ctx).Context, requestScope(ctx).Actor.ID, chats[0].ChatID); err != nil {
+			return err
+		}
+		return a.syncPrivateKeyboard(b, ctx)
+	}
+	rows := make([][]gotgbot.InlineKeyboardButton, 0, len(chats))
+	for _, chat := range chats {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{{
+			Text:         truncateButtonText(fmt.Sprintf("%s %s", chatTypeLabel(chat.ChatType), chatTitle(chat)), 28),
+			CallbackData: CallbackData("private", "select_user", strconv.FormatInt(chat.ChatID, 10)),
+		}})
+	}
+	return respondText(b, ctx, "请选择要使用积分功能的群组：", &gotgbot.SendMessageOpts{ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}})
 }
 
 func (a *App) showPrivateConsole(b *gotgbot.Bot, ctx *ext.Context) error {
@@ -174,6 +278,17 @@ func (a *App) listPrivateManagedChats(ctx *ext.Context) ([]api.ChatBinding, erro
 		}
 	}
 	return filtered, nil
+}
+
+func (a *App) rememberGroupTarget(ctx *ext.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	scope := requestScope(ctx)
+	if scope.Actor.ID == 0 || !isManagedChatType(scope.Chat.Type) {
+		return nil
+	}
+	return a.setSelectedChatID(scope.Context, scope.Actor.ID, scope.Chat.ID)
 }
 
 func (a *App) currentPrivateChat(ctx context.Context, chats []api.ChatBinding, userID int64) (api.ChatBinding, bool) {
@@ -269,12 +384,16 @@ func (a *App) showPrivateSummary(b *gotgbot.Bot, ctx *ext.Context, chat api.Chat
 }
 
 func (a *App) showPrivateLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat api.ChatBinding) error {
-	if a.services.Lottery == nil {
+	if a.services.Lottery == nil && a.services.DailyLottery == nil {
 		return respondText(b, ctx, "抽奖服务尚未接入。", privateConsoleMarkup(chat))
 	}
-	activeItems, err := a.services.Lottery.ListActiveItems(requestScope(ctx).Context, chat.ChatID, 6)
-	if err != nil {
-		return err
+	var activeItems []api.Lottery
+	if a.services.Lottery != nil {
+		var err error
+		activeItems, err = a.services.Lottery.ListActiveItems(requestScope(ctx).Context, chat.ChatID, 6)
+		if err != nil {
+			return err
+		}
 	}
 	lines := []string{
 		"🎁 抽奖中心",
@@ -283,6 +402,19 @@ func (a *App) showPrivateLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat ap
 		fmt.Sprintf("目标类型：%s", chatTypeLabel(chat.ChatType)),
 		fmt.Sprintf("当前进行中：%d 场", len(activeItems)),
 		"",
+	}
+	if a.services.DailyLottery != nil {
+		status, err := a.services.DailyLottery.Status(requestScope(ctx).Context, chat.ChatID, requestScope(ctx).Actor.ID)
+		if err == nil {
+			lines = append(lines, "每日额度抽奖")
+			lines = append(lines, fmt.Sprintf("今日次数：%d/%d · 剩余：%d", status.UsedAttempts, status.DailyAttempts, status.Remaining))
+			if status.CostPoints == 0 {
+				lines = append(lines, "抽奖成本：免费")
+			} else {
+				lines = append(lines, fmt.Sprintf("抽奖成本：%d 积分/次", status.CostPoints))
+			}
+			lines = append(lines, "")
+		}
 	}
 	if len(activeItems) > 0 {
 		lines = append(lines, "当前进行中的抽奖活动")
@@ -307,6 +439,9 @@ func (a *App) showPrivateLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat ap
 func privateLotteryMarkup(chat api.ChatBinding, items []api.Lottery) *gotgbot.SendMessageOpts {
 	chatResource := strconv.FormatInt(chat.ChatID, 10)
 	rows := [][]gotgbot.InlineKeyboardButton{
+		{
+			{Text: "🎲 每日额度抽奖", CallbackData: CallbackData("daily_lottery", "refresh", chatResource)},
+		},
 		{
 			{Text: "🔘 按钮抽奖", CallbackData: CallbackData("private", "lottery_button_create", chatResource)},
 			{Text: "🔤 口令抽奖", CallbackData: CallbackData("private", "lottery_keyword_create", chatResource)},
@@ -346,6 +481,17 @@ func (a *App) showPrivateAdminCenter(b *gotgbot.Bot, ctx *ext.Context, chat api.
 		}
 	}
 	return respondText(b, ctx, strings.Join(lines, "\n"), privateConsoleMarkup(chat))
+}
+
+func (a *App) showPrivateAdminConfig(b *gotgbot.Bot, ctx *ext.Context, chat api.ChatBinding) error {
+	if a.services.Admin == nil {
+		return sendText(b, ctx, "群组配置服务尚未接入。", nil)
+	}
+	cfg, err := a.services.Admin.GetConfig(requestScope(ctx).Context, chat.ChatID)
+	if err != nil {
+		return err
+	}
+	return respondText(b, ctx, formatAdminConfig(cfg), privateConsoleMarkup(chat))
 }
 
 func (a *App) showPointsMenuForChat(b *gotgbot.Bot, ctx *ext.Context, chatID int64, back *gotgbot.SendMessageOpts) error {

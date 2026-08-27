@@ -7,6 +7,7 @@ const AutoRepliesView = () => import("@/views/AutoRepliesView.vue");
 const BackupView = () => import("@/views/BackupView.vue");
 const BansView = () => import("@/views/BansView.vue");
 const BotsView = () => import("@/views/BotsView.vue");
+const BotMenuView = () => import("@/views/BotMenuView.vue");
 const ChatsView = () => import("@/views/ChatsView.vue");
 const DashboardView = () => import("@/views/DashboardView.vue");
 const InviteLinksView = () => import("@/views/InviteLinksView.vue");
@@ -16,6 +17,7 @@ const LoginView = () => import("@/views/LoginView.vue");
 const LotteryView = () => import("@/views/LotteryView.vue");
 const PointLogsView = () => import("@/views/PointLogsView.vue");
 const PointsConfigView = () => import("@/views/PointsConfigView.vue");
+const PointCenterView = () => import("@/views/PointCenterView.vue");
 const PostsView = () => import("@/views/PostsView.vue");
 const StatsView = () => import("@/views/StatsView.vue");
 const TemplatesView = () => import("@/views/TemplatesView.vue");
@@ -66,6 +68,14 @@ const router = createRouter({
           },
         },
         {
+          path: "bot-menu",
+          name: "bot-menu",
+          component: BotMenuView,
+          meta: {
+            title: "机器人菜单",
+          },
+        },
+        {
           path: "chats",
           name: "chats",
           component: ChatsView,
@@ -92,6 +102,12 @@ const router = createRouter({
           meta: {
             title: "积分规则",
           },
+        },
+        {
+          path: "point-center",
+          name: "point-center",
+          component: PointCenterView,
+          meta: { title: "积分中心" },
         },
         {
           path: "points/logs",

@@ -91,6 +91,9 @@ func shouldPreAnswerCallback(payload CallbackPayload) bool {
 	if payload.Domain == "verify" {
 		return false
 	}
+	if payload.Domain == "subscribe" {
+		return false
+	}
 	return true
 }
 
@@ -98,9 +101,12 @@ func (a *App) registerCallbackRoutes() {
 	a.router.HandleDomain("menu", a.routeMenuCallback)
 	a.router.HandleDomain("points", a.routePointsCallback)
 	a.router.HandleDomain("lottery", a.routeLotteryCallback)
+	a.router.HandleDomain("daily_lottery", a.routeDailyLotteryCallback)
 	a.router.HandleDomain("publish", a.routePublishCallback)
 	a.router.HandleDomain("admin", a.routeAdminCallback)
 	a.router.HandleDomain("private", a.routePrivateCallback)
 	a.router.HandleDomain("wizard", a.routeWizardCallback)
 	a.router.HandleDomain("verify", a.routeVerifyCallback)
+	a.router.HandleDomain("subscribe", a.handleForceSubscribeCallback)
+	a.router.HandleDomain("pointcenter", a.routePointCenterCallback)
 }

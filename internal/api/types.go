@@ -32,26 +32,29 @@ type LoginRateLimiter interface {
 }
 
 type Dependencies struct {
-	Auth             AdminAuthService
-	BotConfig        BotConfigService
-	Chats            ChatBindingService
-	ChatPointConfigs ChatPointConfigService
-	Points           PointsAdminService
-	Admin            ChatAdminService
-	Lotteries        LotteryService
-	Levels           LevelService
-	AdminViolations  AdminViolationService
-	Keywords         KeywordService
-	AutoReplies      AutoReplyService
-	Backups          BackupService
-	Templates        TemplateService
-	InviteLinks      InviteLinkService
-	Posts            PostService
-	Schedules        ScheduleService
-	Stats            StatsService
-	Users            UserService
-	AuditLogs        AuditLogService
-	SystemSettings   SystemSettingsService
+	Auth                  AdminAuthService
+	BotConfig             BotConfigService
+	Chats                 ChatBindingService
+	ChatPointConfigs      ChatPointConfigService
+	Points                PointsAdminService
+	Admin                 ChatAdminService
+	Lotteries             LotteryService
+	Levels                LevelService
+	AdminViolations       AdminViolationService
+	Keywords              KeywordService
+	AutoReplies           AutoReplyService
+	Backups               BackupService
+	Templates             TemplateService
+	InviteLinks           InviteLinkService
+	Posts                 PostService
+	Schedules             ScheduleService
+	Stats                 StatsService
+	Users                 UserService
+	AuditLogs             AuditLogService
+	SystemSettings        SystemSettingsService
+	BotMenu               BotMenuService
+	PointCenter           PointCenterService
+	DailyLottery          DailyLotteryAdminService
 	JWT                   JWTConfig
 	Redis                 LoginRateLimiter
 	AllowedOriginSet      []string
@@ -230,18 +233,62 @@ type CursorListResponse[T any] struct {
 }
 
 type ChatAdminConfig struct {
-	ChatID        int64  `json:"chat_id"`
-	WelcomeText   string `json:"welcome_text"`
-	VerifyEnabled bool   `json:"verify_enabled"`
-	VerifyTimeout int    `json:"verify_timeout"`
-	WarnLimit     int    `json:"warn_limit"`
+	ChatID                      int64  `json:"chat_id"`
+	WelcomeText                 string `json:"welcome_text"`
+	WelcomeEnabled              bool   `json:"welcome_enabled"`
+	WelcomeDeleteSeconds        int    `json:"welcome_delete_seconds"`
+	VerifyEnabled               bool   `json:"verify_enabled"`
+	VerifyType                  string `json:"verify_type"`
+	VerifyTimeout               int    `json:"verify_timeout"`
+	VerifyQuestion              string `json:"verify_question"`
+	VerifyOptions               string `json:"verify_options"`
+	VerifyCorrectIndex          int    `json:"verify_correct_index"`
+	VerifyDifficulty            string `json:"verify_difficulty"`
+	WarnLimit                   int    `json:"warn_limit"`
+	ForceSubscribeEnabled       bool   `json:"force_subscribe_enabled"`
+	ForceSubscribeChannels      string `json:"force_subscribe_channels"`
+	ForceSubscribeAction        string `json:"force_subscribe_action"`
+	ForceSubscribeMessage       string `json:"force_subscribe_message"`
+	ForceSubscribeKickMessage   string `json:"force_subscribe_kick_message"`
+	ForceSubscribeChannelLabels string `json:"force_subscribe_channel_labels"`
+	BlockLinks                  bool   `json:"block_links"`
+	LinkWhitelist               string `json:"link_whitelist"`
+	LinkBlacklist               string `json:"link_blacklist"`
+	BlockForwards               bool   `json:"block_forwards"`
+	BlockMedia                  bool   `json:"block_media"`
+	KeywordFilterEnabled        bool   `json:"keyword_filter_enabled"`
+	SpamScoreThreshold          int    `json:"spam_score_threshold"`
+	AiFilterEnabled             bool   `json:"ai_filter_enabled"`
+	RestrictUnverified          bool   `json:"restrict_unverified"`
 }
 
 type ChatAdminConfigUpdateRequest struct {
-	WelcomeText   *string `json:"welcome_text,omitempty"`
-	VerifyEnabled *bool   `json:"verify_enabled,omitempty"`
-	VerifyTimeout *int    `json:"verify_timeout,omitempty" binding:"omitempty,gte=0"`
-	WarnLimit     *int    `json:"warn_limit,omitempty" binding:"omitempty,gte=1"`
+	WelcomeText                 *string `json:"welcome_text,omitempty"`
+	WelcomeEnabled              *bool   `json:"welcome_enabled,omitempty"`
+	WelcomeDeleteSeconds        *int    `json:"welcome_delete_seconds,omitempty" binding:"omitempty,gte=0,lte=3600"`
+	VerifyEnabled               *bool   `json:"verify_enabled,omitempty"`
+	VerifyType                  *string `json:"verify_type,omitempty" binding:"omitempty,oneof=button captcha multi_choice poll math turnstile"`
+	VerifyTimeout               *int    `json:"verify_timeout,omitempty" binding:"omitempty,gte=10,lte=3600"`
+	VerifyQuestion              *string `json:"verify_question,omitempty"`
+	VerifyOptions               *string `json:"verify_options,omitempty"`
+	VerifyCorrectIndex          *int    `json:"verify_correct_index,omitempty" binding:"omitempty,gte=-1,lte=9"`
+	VerifyDifficulty            *string `json:"verify_difficulty,omitempty" binding:"omitempty,oneof=easy medium hard"`
+	WarnLimit                   *int    `json:"warn_limit,omitempty" binding:"omitempty,gte=1,lte=20"`
+	ForceSubscribeEnabled       *bool   `json:"force_subscribe_enabled,omitempty"`
+	ForceSubscribeChannels      *string `json:"force_subscribe_channels,omitempty"`
+	ForceSubscribeAction        *string `json:"force_subscribe_action,omitempty" binding:"omitempty,oneof=mute kick"`
+	ForceSubscribeMessage       *string `json:"force_subscribe_message,omitempty"`
+	ForceSubscribeKickMessage   *string `json:"force_subscribe_kick_message,omitempty"`
+	ForceSubscribeChannelLabels *string `json:"force_subscribe_channel_labels,omitempty"`
+	BlockLinks                  *bool   `json:"block_links,omitempty"`
+	LinkWhitelist               *string `json:"link_whitelist,omitempty"`
+	LinkBlacklist               *string `json:"link_blacklist,omitempty"`
+	BlockForwards               *bool   `json:"block_forwards,omitempty"`
+	BlockMedia                  *bool   `json:"block_media,omitempty"`
+	KeywordFilterEnabled        *bool   `json:"keyword_filter_enabled,omitempty"`
+	SpamScoreThreshold          *int    `json:"spam_score_threshold,omitempty" binding:"omitempty,gte=1,lte=100"`
+	AiFilterEnabled             *bool   `json:"ai_filter_enabled,omitempty"`
+	RestrictUnverified          *bool   `json:"restrict_unverified,omitempty"`
 }
 
 type BanLog struct {
@@ -776,6 +823,174 @@ type BotConfigService interface {
 	Update(ctx context.Context, req BotConfigUpdateRequest) (*BotConfig, error)
 }
 
+type BotMenuItem struct {
+	ID            string              `json:"id,omitempty"`
+	TelegramBotID int64               `json:"telegram_bot_id,omitempty"`
+	Role          string              `json:"role"`
+	Label         string              `json:"label"`
+	Icon          string              `json:"icon"`
+	ActionType    string              `json:"action_type"`
+	ActionKey     string              `json:"action_key"`
+	ActionValue   string              `json:"action_value"`
+	MessageText   string              `json:"message_text"`
+	LinkMode      string              `json:"link_mode"`
+	LinkButtons   []BotMenuInlineLink `json:"link_buttons"`
+	RowIndex      int                 `json:"row_index"`
+	ColumnIndex   int                 `json:"column_index"`
+	Enabled       bool                `json:"enabled"`
+}
+
+type BotMenuInlineLink struct {
+	Label       string `json:"label"`
+	URL         string `json:"url"`
+	RowIndex    int    `json:"row_index"`
+	ColumnIndex int    `json:"column_index"`
+}
+
+type BotMenuItemInput struct {
+	Label       string              `json:"label"`
+	Icon        string              `json:"icon"`
+	ActionType  string              `json:"action_type"`
+	ActionKey   string              `json:"action_key"`
+	ActionValue string              `json:"action_value"`
+	MessageText string              `json:"message_text"`
+	LinkMode    string              `json:"link_mode"`
+	LinkButtons []BotMenuInlineLink `json:"link_buttons"`
+	RowIndex    int                 `json:"row_index"`
+	ColumnIndex int                 `json:"column_index"`
+	Enabled     bool                `json:"enabled"`
+}
+
+type BotMenuReplaceRequest struct {
+	Role  string             `json:"role" binding:"required"`
+	Items []BotMenuItemInput `json:"items"`
+}
+
+type BotMenuService interface {
+	List(ctx context.Context, role string) ([]BotMenuItem, error)
+	Replace(ctx context.Context, role string, items []BotMenuItemInput) ([]BotMenuItem, error)
+	Reset(ctx context.Context, role string) ([]BotMenuItem, error)
+}
+
+type PointCenterService interface {
+	GetConfig(ctx context.Context, chatID int64) (PointCenterConfig, error)
+	UpdateConfig(ctx context.Context, config PointCenterConfig) (PointCenterConfig, error)
+	ResetReferralForTesting(ctx context.Context, chatID, userID int64) error
+	ListExchangeCodes(ctx context.Context, query ExchangeCodeListQuery) ([]ExchangeCode, error)
+	SummarizeExchangeCodes(ctx context.Context) ([]ExchangeCodeSummary, error)
+	ImportExchangeCodes(ctx context.Context, req ExchangeCodeImportRequest) (ExchangeCodeImportResult, error)
+}
+
+type DailyLotteryConfig struct {
+	ChatID          int64 `json:"chat_id"`
+	Enabled         bool  `json:"enabled"`
+	DailyAttempts   int   `json:"daily_attempts"`
+	CostPoints      int   `json:"cost_points"`
+	GuaranteeOnLast bool  `json:"guarantee_on_last"`
+}
+
+type DailyLotteryPrize struct {
+	ID            uint64 `json:"id,omitempty"`
+	ChatID        int64  `json:"chat_id"`
+	Amount        int    `json:"amount"`
+	Weight        int    `json:"weight"`
+	Enabled       bool   `json:"enabled"`
+	AvailableCode int    `json:"available_code"`
+}
+
+type DailyLotteryPrizeInput struct {
+	Amount  int  `json:"amount" binding:"required,min=1"`
+	Weight  int  `json:"weight" binding:"required,min=1,max=1000"`
+	Enabled bool `json:"enabled"`
+}
+
+type DailyLotteryUpdateRequest struct {
+	ChatID          int                      `json:"chat_id" binding:"required"`
+	Enabled         bool                     `json:"enabled"`
+	CostPoints      int                      `json:"cost_points" binding:"gte=0"`
+	GuaranteeOnLast bool                     `json:"guarantee_on_last"`
+	Prizes          []DailyLotteryPrizeInput `json:"prizes" binding:"required,min=1"`
+}
+
+type DailyLotteryAdminService interface {
+	GetConfig(ctx context.Context, chatID int64) (DailyLotteryConfig, error)
+	UpdateConfig(ctx context.Context, req DailyLotteryUpdateRequest) (DailyLotteryConfig, error)
+	ListPrizes(ctx context.Context, chatID int64) ([]DailyLotteryPrize, error)
+	ReplacePrizes(ctx context.Context, chatID int64, prizes []DailyLotteryPrizeInput) ([]DailyLotteryPrize, error)
+}
+
+type PointCenterReferralResetRequest struct {
+	ChatID int64 `json:"chat_id" binding:"required"`
+	UserID int64 `json:"user_id" binding:"required"`
+}
+
+type PointCenterConfig struct {
+	ChatID               int64  `json:"chat_id"`
+	InviteEnabled        bool   `json:"invite_enabled"`
+	InviterReward        int    `json:"inviter_reward"`
+	InviteeReward        int    `json:"invitee_reward"`
+	SignEnabled          bool   `json:"sign_enabled"`
+	SignReward           int    `json:"sign_reward"`
+	ExchangeEnabled      bool   `json:"exchange_enabled"`
+	ExchangeMinimum      int    `json:"exchange_minimum"`
+	ExchangeRate         int    `json:"exchange_rate"`
+	ExchangeURL          string `json:"exchange_url"`
+	ExchangeInstructions string `json:"exchange_instructions"`
+	PurchaseURL          string `json:"purchase_url"`
+	PurchaseText         string `json:"purchase_text"`
+	ShopURL              string `json:"shop_url"`
+	ShopText             string `json:"shop_text"`
+	InviteText           string `json:"invite_text"`
+	InvitePageTemplate   string `json:"invite_page_template"`
+	InviteJoinURL        string `json:"invite_join_url"`
+	InviteJoinText       string `json:"invite_join_text"`
+	InviteSuccessText    string `json:"invite_success_text"`
+	PointsText           string `json:"points_text"`
+	SignText             string `json:"sign_text"`
+	ExchangeText         string `json:"exchange_text"`
+	RankText             string `json:"rank_text"`
+}
+
+type ExchangeCode struct {
+	ID           string     `json:"id"`
+	Code         string     `json:"code"`
+	BatchName    string     `json:"batch_name"`
+	Amount       int        `json:"amount"`
+	RedeemURL    string     `json:"redeem_url"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	Status       string     `json:"status"`
+	AssignedUser int64      `json:"assigned_user"`
+	AssignedChat int64      `json:"assigned_chat"`
+	AssignedAt   *time.Time `json:"assigned_at,omitempty"`
+}
+
+type ExchangeCodeListQuery struct {
+	Status string `form:"status"`
+	Amount *int   `form:"amount"`
+	Limit  int    `form:"limit,default=100"`
+}
+
+type ExchangeCodeSummary struct {
+	Amount    int `json:"amount"`
+	Available int `json:"available"`
+	Assigned  int `json:"assigned"`
+	Used      int `json:"used"`
+	Total     int `json:"total"`
+}
+
+type ExchangeCodeImportRequest struct {
+	BatchName string     `json:"batch_name"`
+	Amount    int        `json:"amount" binding:"required,min=1"`
+	RedeemURL string     `json:"redeem_url"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Codes     []string   `json:"codes" binding:"required,min=1"`
+}
+
+type ExchangeCodeImportResult struct {
+	Imported int `json:"imported"`
+	Skipped  int `json:"skipped"`
+}
+
 type ChatBindingService interface {
 	Bind(ctx context.Context, req ChatBindingRequest) (*ChatBinding, error)
 	Unbind(ctx context.Context, chatID int64) error
@@ -943,8 +1158,8 @@ type SystemSettingsService interface {
 type TurnstileVerifyRequest struct {
 	ChatID  int64  `json:"chat_id"`
 	UserID  int64  `json:"user_id"`
-	Sig     string `json:"sig"`    // HMAC-SHA256(chat_id|user_id|exp, verify_secret), hex
-	Exp     int64  `json:"exp"`    // Unix timestamp the link expires
+	Sig     string `json:"sig"` // HMAC-SHA256(chat_id|user_id|exp, verify_secret), hex
+	Exp     int64  `json:"exp"` // Unix timestamp the link expires
 	CFToken string `json:"cf_token"`
 }
 

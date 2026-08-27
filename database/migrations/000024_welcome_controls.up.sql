@@ -1,0 +1,3 @@
+ALTER TABLE chat_admin_configs
+    ADD COLUMN IF NOT EXISTS welcome_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS welcome_delete_seconds INTEGER NOT NULL DEFAULT 30;

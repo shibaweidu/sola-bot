@@ -62,6 +62,25 @@ func (a *App) handleMessageModeration(b *gotgbot.Bot, ctx *ext.Context) error {
 	if cfg.SpamScoreThreshold <= 0 {
 		cfg.SpamScoreThreshold = 60
 	}
+	if reason := lockedContentReason(cfg, msg, text); reason != "" {
+		if err := a.services.KeywordFilter.RecordKeywordViolation(scope.Context, KeywordViolation{
+			UserID:        msg.From.Id,
+			ChatID:        msg.Chat.Id,
+			ViolationType: "content_lock",
+			ActionTaken:   "delete_message",
+			MessageText:   truncateRunes(text, 1000),
+			DetectedBy:    reason,
+		}); err != nil {
+			return err
+		}
+		markModerationBlocked(ctx)
+		a.auditKeywordAction(scope, msg.From.Id, "delete_message", "content_lock="+reason)
+		_, err := b.DeleteMessageWithContext(scope.Context, msg.Chat.Id, msg.MessageId, nil)
+		if err != nil {
+			return err
+		}
+		return ext.EndGroups
+	}
 
 	match := KeywordFilterMatch{}
 	if text != "" && cfg.KeywordFilterEnabled {
@@ -131,6 +150,19 @@ func (a *App) handleMessageModeration(b *gotgbot.Bot, ctx *ext.Context) error {
 		return err
 	}
 	return ext.EndGroups
+}
+
+func lockedContentReason(cfg ChatModerationConfig, msg *gotgbot.Message, text string) string {
+	if cfg.BlockLinks && messageHasBlockedLink(msg, text, cfg.LinkWhitelist, cfg.LinkBlacklist) {
+		return "link"
+	}
+	if cfg.BlockForwards && msg.ForwardOrigin != nil {
+		return "forward"
+	}
+	if cfg.BlockMedia && messageHasMedia(msg) {
+		return "media"
+	}
+	return ""
 }
 
 func markModerationBlocked(ctx *ext.Context) {

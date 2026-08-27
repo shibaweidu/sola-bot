@@ -196,9 +196,31 @@ export interface AdjustUserPointsPayload {
 export interface ChatAdminConfig {
   chat_id: ChatID;
   welcome_text: string;
+  welcome_enabled: boolean;
+  welcome_delete_seconds: number;
   verify_enabled: boolean;
+  verify_type: "button" | "captcha" | "multi_choice" | "poll" | "math" | "turnstile";
   verify_timeout: number;
+  verify_question: string;
+  verify_options: string;
+  verify_correct_index: number;
+  verify_difficulty: "easy" | "medium" | "hard";
   warn_limit: number;
+  force_subscribe_enabled: boolean;
+  force_subscribe_channels: string;
+  force_subscribe_action: "mute" | "kick";
+  force_subscribe_message: string;
+  force_subscribe_kick_message: string;
+  force_subscribe_channel_labels: string;
+  block_links: boolean;
+  link_whitelist: string;
+  link_blacklist: string;
+  block_forwards: boolean;
+  block_media: boolean;
+  keyword_filter_enabled: boolean;
+  spam_score_threshold: number;
+  ai_filter_enabled: boolean;
+  restrict_unverified: boolean;
   updated_at?: string;
 }
 

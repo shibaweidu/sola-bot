@@ -8,31 +8,33 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
 )
 
 func (a *App) registerAutoReplyHandlers(d *ext.Dispatcher) {
 	d.AddHandler(handlers.NewCommand("add_reply", a.wrap(a.handleAddReply, a.RateLimit("cmd:add_reply", 1))))
 	d.AddHandler(handlers.NewCommand("del_reply", a.wrap(a.handleDelReply, a.RateLimit("cmd:del_reply", 1))))
 	d.AddHandler(handlers.NewCommand("replies", a.wrap(a.handleListReplies, a.RateLimit("cmd:replies", 1))))
+	d.AddHandler(handlers.NewMessage(message.All, a.handleAutoReply))
 }
 
 func (a *App) handleAutoReply(b *gotgbot.Bot, ctx *ext.Context) error {
 	if a.services.AutoReply == nil || ctx == nil || ctx.Message == nil {
-		return nil
+		return ext.ContinueGroups
 	}
 	msg := ctx.Message
 	if msg.Chat.Type != "group" && msg.Chat.Type != "supergroup" {
-		return nil
+		return ext.ContinueGroups
 	}
 	if msg.From == nil || msg.From.IsBot || strings.TrimSpace(msg.Text) == "" {
-		return nil
+		return ext.ContinueGroups
 	}
 
 	scope := requestScope(ctx)
 	matches, err := a.services.AutoReply.MatchAll(scope.Context, msg.Chat.Id, msg.Text)
 	if err != nil {
 		log.Printf("auto reply match error: %v", err)
-		return nil
+		return ext.ContinueGroups
 	}
 	for _, match := range matches {
 		if strings.TrimSpace(match.ReplyText) == "" {
@@ -52,7 +54,7 @@ func (a *App) handleAutoReply(b *gotgbot.Bot, ctx *ext.Context) error {
 			log.Printf("auto reply send error: %v", sendErr)
 		}
 	}
-	return nil
+	return ext.ContinueGroups
 }
 
 func formatAutoReplyPanel(replies []AutoReplyRecord) string {

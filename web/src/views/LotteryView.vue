@@ -10,6 +10,44 @@
       </template>
     </PageHeader>
 
+    <PanelSection title="每日额度抽奖" description="每个用户在当前群组每天可抽 3 次，奖品从现有额度兑换码库存中发放。">
+      <template #actions>
+        <ChatSelect v-model="selectedChatId" />
+        <el-button :icon="Refresh" :loading="dailyLoading" @click="loadDailyLottery">刷新配置</el-button>
+        <el-button type="primary" :loading="dailySaving" @click="saveDailyLottery">保存每日抽奖</el-button>
+      </template>
+      <el-alert class="daily-alert" type="info" :closable="false" title="权重按千分比计算：总和 1000 表示每次必中奖；低于 1000 的部分表示未中奖概率。第 3 次可开启保底。" />
+      <el-form label-position="top" class="daily-form">
+        <div class="daily-switches">
+          <div class="daily-switch-row"><span>开启每日额度抽奖</span><el-switch v-model="dailyForm.enabled" /></div>
+          <div class="daily-switch-row"><span>第 3 次未中奖时强制发码</span><el-switch v-model="dailyForm.guarantee_on_last" /></div>
+          <div class="daily-fixed-row"><span>每日次数</span><strong>3 次（固定）</strong></div>
+        </div>
+        <el-form-item label="每次抽奖消耗积分（0 = 免费）" class="daily-cost">
+          <el-input-number v-model="dailyForm.cost_points" :min="0" :max="999999" />
+        </el-form-item>
+      </el-form>
+      <div class="daily-prize-header">
+        <div><strong>额度奖池</strong><span>同一额度只能配置一次；无库存额度会自动跳过。</span></div>
+        <el-button type="primary" plain @click="addDailyPrize">添加额度</el-button>
+      </div>
+      <el-table :data="dailyPrizes" stripe size="small" empty-text="请添加至少一个额度奖池">
+        <el-table-column label="额度" min-width="150">
+          <template #default="{ row }"><el-input-number v-model="row.amount" :min="1" :max="999999999" /></template>
+        </el-table-column>
+        <el-table-column label="权重（/1000）" min-width="170">
+          <template #default="{ row }"><el-input-number v-model="row.weight" :min="1" :max="1000" /></template>
+        </el-table-column>
+        <el-table-column label="预计比例" width="110">
+          <template #default="{ row }">{{ dailyPrizePercent(row.weight) }}</template>
+        </el-table-column>
+        <el-table-column prop="available_code" label="可用兑换码" width="120" />
+        <el-table-column label="启用" width="80"><template #default="{ row }"><el-switch v-model="row.enabled" /></template></el-table-column>
+        <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button type="danger" link @click="removeDailyPrize($index)">删除</el-button></template></el-table-column>
+      </el-table>
+      <div class="daily-total">启用奖池权重合计：{{ dailyWeightTotal }}/1000 · {{ dailyPrizePercent(dailyWeightTotal) }}</div>
+    </PanelSection>
+
     <div class="summary-grid">
       <div class="summary-card">
         <div class="summary-label">当前活动</div>
@@ -184,13 +222,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { MoreFilled, Plus, Refresh } from "@element-plus/icons-vue";
 import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
 import { cancelLottery, createLottery, fetchLotteries, fetchLotteryEntries, fetchLotteryWinners } from "@/api/lottery";
+import { fetchDailyLotteryConfig, fetchDailyLotteryPrizes, updateDailyLottery, type DailyLotteryPrize } from "@/api/dailyLottery";
 import type { ChatID, LotteryEntryRecord, LotteryPayload, LotteryRecord } from "@/types/api";
 import { parseChinaLocalDateTimeToISO } from "@/utils/datetime";
 import { parseNumericId, formatDateTime, errorMessage } from "@/utils/helpers";
@@ -207,6 +246,10 @@ const cancellingId = ref<ChatID>();
 const selectedChatId = ref<ChatID | "">("");
 const statusFilter = ref<LotteryRecord["status"] | "">("");
 const joinTypeFilter = ref<LotteryRecord["join_type"] | "">("");
+const dailyLoading = ref(false);
+const dailySaving = ref(false);
+const dailyPrizes = ref<DailyLotteryPrize[]>([]);
+const dailyForm = reactive({ enabled: false, daily_attempts: 3, cost_points: 0, guarantee_on_last: true });
 const form = reactive<LotteryPayload>({
   chat_id: "",
   title: "",
@@ -246,6 +289,7 @@ const statusCounts = computed(() => {
 });
 
 const totalEntries = computed(() => filteredLotteries.value.reduce((sum, item) => sum + Number(item.entry_count ?? item.participants ?? 0), 0));
+const dailyWeightTotal = computed(() => dailyPrizes.value.filter((item) => item.enabled).reduce((sum, item) => sum + Number(item.weight || 0), 0));
 
 function optionalText(value?: string | null): string | undefined {
   const text = value?.trim();
@@ -408,7 +452,74 @@ function joinTypeTag(joinType?: LotteryRecord["join_type"]): "success" | "warnin
   return "success";
 }
 
-onMounted(loadLotteries);
+function dailyPrizePercent(weight: number): string {
+  return `${((Math.max(0, Number(weight) || 0) / 1000) * 100).toFixed(1)}%`;
+}
+
+function addDailyPrize(): void {
+  dailyPrizes.value.push({ chat_id: selectedChatId.value || "", amount: 10, weight: 100, enabled: true, available_code: 0 });
+}
+
+function removeDailyPrize(index: number): void {
+  dailyPrizes.value.splice(index, 1);
+}
+
+async function loadDailyLottery(): Promise<void> {
+  if (!selectedChatId.value) {
+    dailyPrizes.value = [];
+    Object.assign(dailyForm, { enabled: false, daily_attempts: 3, cost_points: 0, guarantee_on_last: true });
+    return;
+  }
+  dailyLoading.value = true;
+  try {
+    const [config, prizes] = await Promise.all([fetchDailyLotteryConfig(selectedChatId.value), fetchDailyLotteryPrizes(selectedChatId.value)]);
+    Object.assign(dailyForm, config);
+    dailyPrizes.value = prizes.items;
+  } catch (error) {
+    ElMessage.error(errorMessage(error));
+  } finally {
+    dailyLoading.value = false;
+  }
+}
+
+async function saveDailyLottery(): Promise<void> {
+  if (!selectedChatId.value) {
+    ElMessage.warning("请先选择群组");
+    return;
+  }
+  const seen = new Set<number>();
+  for (const prize of dailyPrizes.value) {
+    const amount = Number(prize.amount);
+    const weight = Number(prize.weight);
+    if (!Number.isSafeInteger(amount) || amount <= 0) { ElMessage.warning("额度必须是正整数"); return; }
+    if (seen.has(amount)) { ElMessage.warning("额度不能重复"); return; }
+    seen.add(amount);
+    if (!Number.isSafeInteger(weight) || weight < 1 || weight > 1000) { ElMessage.warning("权重必须在 1 到 1000 之间"); return; }
+  }
+  if (!dailyPrizes.value.length || dailyWeightTotal.value <= 0 || dailyWeightTotal.value > 1000) {
+    ElMessage.warning("请配置至少一个奖池，启用权重合计不能超过 1000");
+    return;
+  }
+  dailySaving.value = true;
+  try {
+    await updateDailyLottery({
+      chat_id: selectedChatId.value,
+      enabled: dailyForm.enabled,
+      cost_points: dailyForm.cost_points,
+      guarantee_on_last: dailyForm.guarantee_on_last,
+      prizes: dailyPrizes.value.map(({ amount, weight, enabled }) => ({ amount, weight, enabled })),
+    });
+    ElMessage.success("每日额度抽奖配置已保存");
+    await loadDailyLottery();
+  } catch (error) {
+    ElMessage.error(errorMessage(error));
+  } finally {
+    dailySaving.value = false;
+  }
+}
+
+watch(selectedChatId, () => { void loadDailyLottery(); });
+onMounted(() => { void loadLotteries(); void loadDailyLottery(); });
 </script>
 
 <style scoped>
@@ -434,5 +545,62 @@ onMounted(loadLotteries);
 
 .wide-control {
   width: 100%;
+}
+.daily-alert {
+  margin-bottom: 16px;
+}
+.daily-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.daily-switches {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.daily-switch-row, .daily-fixed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.daily-fixed-row {
+  color: var(--app-muted);
+}
+.daily-fixed-row strong {
+  color: var(--app-text);
+}
+.daily-cost {
+  min-width: 220px;
+  margin-bottom: 0;
+}
+.daily-prize-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.daily-prize-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.daily-prize-header span, .daily-total {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+.daily-total {
+  margin-top: 10px;
+}
+@media (max-width: 900px) {
+  .daily-form { align-items: stretch; flex-direction: column; }
+  .daily-switches { grid-template-columns: 1fr; }
+  .daily-cost { min-width: 0; }
 }
 </style>

@@ -25,6 +25,8 @@ Sola 是一套面向 Telegram 群组运营的开源平台，由 **Bot、Admin AP
 | **Mini App** | Telegram WebApp 面板：仪表盘、群设置、快捷发布、抽奖、入群验证（Turnstile） |
 | **工程基础** | Docker Compose、SQL migrations、多租户隔离、Owner 归属校验、细粒度管理员权限 |
 
+方丈机器人方向的二开范围、配置入口和上线检查见 [docs/fangzhang-edition.md](./docs/fangzhang-edition.md)。
+
 ## 架构概览
 
 ```mermaid
@@ -97,6 +99,64 @@ cp .env.example .env
 htpasswd -bnBC 12 "" your-password | tr -d ":\n"
 ```
 
+### Windows 一键启动
+
+确认 Docker Desktop 已启动后，双击项目根目录的 `start.bat`。脚本会自动：
+
+1. 保留已有 `.env`，没有时从 `.env.example` 创建。
+2. 首次运行且前端产物不存在时构建 Web 管理后台和 Mini App。
+3. 启动 PostgreSQL、Redis、数据库迁移、API、Nginx 和 Worker。
+4. 检测到有效 `SOLA_BOT_TOKEN` 后自动启动 Telegram Bot；占位 Token 会被跳过。
+
+命令行启动或代码更新后强制重建：
+
+```powershell
+.\start.bat
+.\start.bat -Build
+```
+
+停止服务：
+
+```powershell
+docker compose --env-file .env down
+```
+
+### Telegram 接入
+
+1. 在 Telegram 中打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot`，按提示设置名称和用户名，复制生成的 Token。
+2. 将 Token 写入 `.env` 的 `SOLA_BOT_TOKEN`，保持 `SOLA_BOT_MODE=polling`。Polling 不需要公网域名或 HTTPS。
+3. 双击 `start.bat`，或执行 `docker compose --env-file .env up -d bot worker`。使用 `docker compose --env-file .env logs -f bot` 查看连接日志；看到 `telegram bot connected` 即表示接入成功。
+4. 将机器人加入测试群并设为管理员，至少授予：删除消息、限制成员（禁言）、封禁成员、邀请用户。需要机器人执行管理员升降级时，再授予添加管理员权限。
+5. 在 BotFather 的 Bot Settings → Group Privacy 中执行 `/setprivacy`，选择 **Disable**。否则机器人只能收到命令，无法处理普通消息、垃圾拦截和自动回复。
+6. 在群里发送 `/start` 或 `/menu`，按提示绑定群组；之后可在 Web 后台配置欢迎、验证、垃圾拦截、自动回复、定时任务和成员管理。
+
+强制订阅的额外要求：把机器人加入每个必订阅频道并设为频道管理员，否则 Telegram 不允许机器人可靠调用订阅状态检查。公开频道可使用 `@频道用户名`，私有频道使用数字 ID（如 `-1001234567890`）。例如：
+
+```text
+/force_subscribe on mute @your_channel
+/force_subscribe on kick @your_channel -1001234567890
+```
+
+用户未订阅时会收到订阅按钮；点击「我已订阅」后机器人复核状态，仍未订阅则持续禁言或移出群组。Bot Token 属于密码，不要提交到 Git 或公开日志。
+
+强制订阅的文字和频道昵称可在 Web 后台「群组设置 → 强制订阅」中编辑：
+
+- **未订阅提示文案**：发送给被禁言成员的提示。
+- **移出群组提示文案**：选择 `kick` 时发送的提示。
+- **频道显示名称**：每行填写 `频道目标 | 显示名称`，例如 `@your_channel | 考拉 AI 官方频道`。也支持 `=` 分隔；频道目标仍以「必订阅频道」中的值为准，只改变按钮和提示里的显示文字。
+- 文案支持 `{name}`（用户名称）和 `{channels}`（当前未订阅频道的显示名称，多个频道用顿号连接）。留空时使用系统默认文案。
+
+例如：
+
+```text
+频道显示名称：
+@your_channel | 考拉 AI 官方频道
+-1001234567890 | VIP 资源频道
+
+未订阅提示文案：
+{name}，请先关注以下频道：{channels}\n完成后点击下方按钮检查。
+```
+
 **Cloudflare Turnstile 验证（可选，启用 `turnstile` 验证类型时必填）：**
 
 | 变量 | 说明 |
@@ -106,13 +166,13 @@ htpasswd -bnBC 12 "" your-password | tr -d ":\n"
 | `SOLA_TURNSTILE_SECRET_KEY` | Cloudflare Dashboard → Turnstile 获取 |
 | `SOLA_TURNSTILE_VERIFY_SECRET` | 链接签名密钥，随机 32 字节即可：`openssl rand -base64 32` |
 
-### 2. 启动全部服务
+### 2. 启动全部服务（Linux/macOS）
 
 ```bash
 docker compose up -d --build
 ```
 
-Compose 会按顺序启动：`postgres` → `redis` → `migrate`（执行尚未应用的 `*.up.sql`）→ `api` / `bot` / `worker` → `nginx`。
+Compose 会按顺序启动：`postgres` → `redis` → `migrate`（执行尚未应用的 `*.up.sql`）→ `api` / `bot` / `worker` → `nginx`。Token 仍为占位值时，Bot 容器会因配置错误退出；建议先完成上面的 Telegram 接入再启动全部服务。
 
 API 默认只在容器网络内可访问，`nginx` 对外提供入口。如需本机直连 API 调试：
 
@@ -177,6 +237,8 @@ cd web && npm install && npm run dev
 **群管**：`/ban` `/bans` `/unban` `/mute` `/unmute` `/kick` `/warn` `/warns` `/unwarn` `/purge` `/del` `/promote` `/demote` `/set_title` `/report` `/ban_ghosts` `/violations` `/resolve_violation` `/ignore_violation`
 
 **验证**：`/adminconfig` `/set_welcome` `/set_warn_limit` `/verify_toggle` `/set_verify` `/verify_stats`
+
+**强制订阅**：`/force_subscribe on|off [mute|kick] [频道...]`
 
 **群规**：`/setrules` `/clearrules` `/rules`
 

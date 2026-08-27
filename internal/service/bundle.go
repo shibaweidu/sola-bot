@@ -34,6 +34,9 @@ type Bundle struct {
 	InviteLink      *InviteLinkService
 	AuditLog        *AuditService
 	AiFilter        *AiFilterService
+	BotMenu         *BotMenuService
+	PointCenter     *PointCenterService
+	DailyLottery    *DailyLotteryService
 }
 
 func NewBundle(st *store.Store, redisClient *redis.Client) *Bundle {
@@ -59,6 +62,9 @@ func NewBundleWithBotToken(st *store.Store, redisClient *redis.Client, botToken 
 		InviteLink:      NewInviteLinkService(st, botToken),
 		AuditLog:        NewAuditService(st),
 		AiFilter:        NewAiFilterService(cfg.AiFilter),
+		BotMenu:         NewBotMenuService(st, botToken),
+		PointCenter:     NewPointCenterService(st, botToken),
+		DailyLottery:    NewDailyLotteryService(st),
 	}
 }
 
@@ -81,6 +87,9 @@ func (b *Bundle) BotServices() bot.Services {
 		AuditLog:       b.AuditLog,
 		AiFilter:       b.AiFilter,
 		Redis:          b.redisClient,
+		Menu:           b.BotMenu,
+		PointCenter:    b.PointCenter,
+		DailyLottery:   b.DailyLottery,
 	}
 }
 
