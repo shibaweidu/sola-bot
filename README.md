@@ -174,6 +174,24 @@ docker compose up -d --build
 
 Compose 会按顺序启动：`postgres` → `redis` → `migrate`（执行尚未应用的 `*.up.sql`）→ `api` / `bot` / `worker` → `nginx`。Token 仍为占位值时，Bot 容器会因配置错误退出；建议先完成上面的 Telegram 接入再启动全部服务。
 
+### GitHub 自动构建与生产服务器更新
+
+仓库包含 GitHub Actions 和生产 Compose，可自动构建 API、Bot、Worker、Web、Migration 五个镜像并发布到 GHCR。服务器只需要 Docker 和 `.env`，无需安装 Go、Node.js 或保存完整源码。
+
+服务器更新命令：
+
+```bash
+./scripts/deploy.sh
+```
+
+指定提交镜像回滚：
+
+```bash
+./scripts/deploy.sh sha-0ca991c
+```
+
+完整的服务器初始化、GitHub Secrets 和自动部署配置见 [GitHub 自动构建与 Docker 生产部署](./docs/docker-production-deploy.md)。
+
 API 默认只在容器网络内可访问，`nginx` 对外提供入口。如需本机直连 API 调试：
 
 ```bash

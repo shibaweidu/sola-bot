@@ -1,0 +1,119 @@
+name: sola-bot
+
+x-app-image: &app-image
+  restart: unless-stopped
+  env_file:
+    - .env
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SOLA_DATABASE_NAME:-sola}
+      POSTGRES_USER: ${SOLA_DATABASE_USER:-sola}
+      POSTGRES_PASSWORD: ${SOLA_DATABASE_PASSWORD:?Set SOLA_DATABASE_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  migrate:
+    image: ${SOLA_IMAGE_REGISTRY:-ghcr.io/shibaweidu/sola-bot}/migrate:${SOLA_IMAGE_TAG:-latest}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${SOLA_DATABASE_DSN:?Set SOLA_DATABASE_DSN in .env}
+
+  api:
+    <<: *app-image
+    image: ${SOLA_IMAGE_REGISTRY:-ghcr.io/shibaweidu/sola-bot}/api:${SOLA_IMAGE_TAG:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  bot:
+    <<: *app-image
+    image: ${SOLA_IMAGE_REGISTRY:-ghcr.io/shibaweidu/sola-bot}/bot:${SOLA_IMAGE_TAG:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -r /proc/1/exe"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    <<: *app-image
+    image: ${SOLA_IMAGE_REGISTRY:-ghcr.io/shibaweidu/sola-bot}/worker:${SOLA_IMAGE_TAG:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -r /proc/1/exe"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: ${SOLA_IMAGE_REGISTRY:-ghcr.io/shibaweidu/sola-bot}/web:${SOLA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${SOLA_HTTP_BIND:-0.0.0.0}:${SOLA_HTTP_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/healthz >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  pgdata:
+  redis_data:

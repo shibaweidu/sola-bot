@@ -27,6 +27,7 @@ logs/
 
 # Local tooling
 .ace-tool/
+.gocache/
 
 # OS files
 .DS_Store

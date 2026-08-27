@@ -1,0 +1,191 @@
+name: Build and publish Docker images
+
+on:
+  push:
+    branches:
+      - main
+      - feature/fangzhang-edition
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      image_registry: ${{ steps.release.outputs.image_registry }}
+      image_tag: ${{ steps.release.outputs.image_tag }}
+      channel_tag: ${{ steps.release.outputs.channel_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test backend
+        run: |
+          go test ./...
+          go vet ./...
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web applications
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npm run build:mini
+
+      - name: Calculate image coordinates
+        id: release
+        shell: bash
+        run: |
+          image_registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          image_tag="sha-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            channel_tag="latest"
+          else
+            ref_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+            channel_tag="$(printf '%s' "$ref_name" | tr '[:upper:]/_' '[:lower:]--' | tr -cd 'a-z0-9.-')"
+          fi
+          {
+            echo "image_registry=$image_registry"
+            echo "image_tag=$image_tag"
+            echo "channel_tag=$channel_tag"
+          } >> "$GITHUB_OUTPUT"
+
+  images:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: Dockerfile
+            target: api
+          - image: bot
+            dockerfile: Dockerfile
+            target: bot
+          - image: worker
+            dockerfile: Dockerfile
+            target: worker
+          - image: web
+            dockerfile: Dockerfile.web
+            target: web
+          - image: migrate
+            dockerfile: Dockerfile.migrate
+            target: migrate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and optionally publish ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ needs.verify.outputs.image_registry }}/${{ matrix.image }}:${{ needs.verify.outputs.image_tag }}
+            ${{ needs.verify.outputs.image_registry }}/${{ matrix.image }}:${{ needs.verify.outputs.channel_tag }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          provenance: mode=max
+          sbom: true
+
+  deploy:
+    needs:
+      - verify
+      - images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deployment configuration
+        id: config
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        shell: bash
+        run: |
+          if [[ -n "$SERVER_HOST" && -n "$SERVER_USER" && -n "$SERVER_SSH_KEY" && -n "$SERVER_KNOWN_HOSTS" && -n "$DEPLOY_PATH" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Deployment skipped: production SSH secrets are not fully configured."
+          fi
+
+      - name: Configure SSH
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/sola_deploy
+          printf '%s\n' "$SERVER_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/sola_deploy ~/.ssh/known_hosts
+
+      - name: Upload deployment files
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        shell: bash
+        run: |
+          port="${SERVER_PORT:-22}"
+          ssh -i ~/.ssh/sola_deploy -p "$port" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$DEPLOY_PATH/scripts'"
+          scp -i ~/.ssh/sola_deploy -P "$port" docker-compose.prod.yml "$SERVER_USER@$SERVER_HOST:$DEPLOY_PATH/docker-compose.prod.yml"
+          scp -i ~/.ssh/sola_deploy -P "$port" scripts/deploy.sh "$SERVER_USER@$SERVER_HOST:$DEPLOY_PATH/scripts/deploy.sh"
+
+      - name: Pull images and deploy
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          IMAGE_REGISTRY: ${{ needs.verify.outputs.image_registry }}
+          IMAGE_TAG: ${{ needs.verify.outputs.image_tag }}
+        shell: bash
+        run: |
+          port="${SERVER_PORT:-22}"
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/sola_deploy -p "$port" "$SERVER_USER@$SERVER_HOST" \
+            "docker login ghcr.io --username '$GHCR_USERNAME' --password-stdin"
+          ssh -i ~/.ssh/sola_deploy -p "$port" "$SERVER_USER@$SERVER_HOST" \
+            "cd '$DEPLOY_PATH' && chmod +x scripts/deploy.sh && SOLA_IMAGE_REGISTRY='$IMAGE_REGISTRY' SOLA_IMAGE_TAG='$IMAGE_TAG' ./scripts/deploy.sh"
