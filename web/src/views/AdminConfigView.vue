@@ -24,6 +24,26 @@
           </el-form>
         </PanelSection>
 
+        <PanelSection title="欢迎语内联按钮" description="按钮按当前群组保存，每个按钮单独一行；抽奖按钮会跳转机器人私聊。">
+          <div class="welcome-button-list">
+            <div v-for="(button, index) in welcomeButtons" :key="button.id || index" class="welcome-button-row" draggable="true" @dragstart="dragWelcomeButton(index)" @dragover.prevent @drop="dropWelcomeButton(index)">
+              <el-input v-model="button.label" class="welcome-button-label" placeholder="按钮名称" />
+              <el-select v-model="button.action_type" class="welcome-button-type">
+                <el-option label="每日抽奖" value="daily_lottery" />
+                <el-option label="HTTPS 链接" value="link" />
+              </el-select>
+              <el-input v-if="button.action_type === 'link'" v-model="button.action_value" class="welcome-button-url" placeholder="https://example.com" />
+              <span v-else class="welcome-button-url-hint">自动生成私聊抽奖入口</span>
+              <el-switch v-model="button.enabled" />
+              <el-button type="danger" link @click="removeWelcomeButton(index)">删除</el-button>
+            </div>
+          </div>
+          <div class="welcome-button-actions">
+            <el-button plain @click="addWelcomeButton">添加按钮</el-button>
+            <span class="field-hint">最多 20 个按钮，最多 1 个每日抽奖按钮；链接必须以 https:// 开头。</span>
+          </div>
+        </PanelSection>
+
         <PanelSection title="强制订阅" description="未订阅指定频道的成员将被禁言或移出群组；管理员和验证白名单自动豁免。">
           <el-form label-position="top">
             <el-form-item label="启用强制订阅">
@@ -207,20 +227,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { Check, Refresh } from "@element-plus/icons-vue";
 import { useRoute } from "vue-router";
 import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
-import { fetchAdminConfig, updateAdminConfig } from "@/api/admin";
-import type { ChatAdminConfigPayload } from "@/types/api";
+import { fetchAdminConfig, fetchWelcomeButtons, updateAdminConfig, updateWelcomeButtons } from "@/api/admin";
+import type { ChatAdminConfigPayload, WelcomeButton } from "@/types/api";
 
 const route = useRoute();
 const selectedChatId = ref("");
 const loading = ref(false);
 const saving = ref(false);
+const welcomeButtons = ref<WelcomeButton[]>([]);
+const draggingWelcomeButton = ref<number | null>(null);
 const form = reactive<ChatAdminConfigPayload>({
   welcome_text: "",
   welcome_enabled: true,
@@ -263,7 +285,9 @@ async function loadConfig(): Promise<void> {
   if (!selectedChatId.value) return;
   loading.value = true;
   try {
-    Object.assign(form, await fetchAdminConfig(selectedChatId.value));
+    const [config, buttons] = await Promise.all([fetchAdminConfig(selectedChatId.value), fetchWelcomeButtons(selectedChatId.value)]);
+    Object.assign(form, config);
+    welcomeButtons.value = buttons.items;
   } catch {
     ElMessage.error("服务暂时不可用");
   } finally {
@@ -276,6 +300,7 @@ async function submitConfig(): Promise<void> {
   saving.value = true;
   try {
     Object.assign(form, await updateAdminConfig(selectedChatId.value, { ...form }));
+    await updateWelcomeButtons(selectedChatId.value, welcomeButtons.value.map((button, index) => ({ ...button, sort_order: index })));
     ElMessage.success("群组配置已保存");
   } catch {
     ElMessage.error("服务暂时不可用");
@@ -283,6 +308,25 @@ async function submitConfig(): Promise<void> {
     saving.value = false;
   }
 }
+
+function addWelcomeButton(): void {
+  welcomeButtons.value.push({ chat_id: selectedChatId.value, label: "🎁 每日抽奖", action_type: "daily_lottery", action_value: "", enabled: true, sort_order: welcomeButtons.value.length });
+}
+
+function removeWelcomeButton(index: number): void { welcomeButtons.value.splice(index, 1); }
+
+function dragWelcomeButton(index: number): void { draggingWelcomeButton.value = index; }
+
+function dropWelcomeButton(index: number): void {
+  const from = draggingWelcomeButton.value;
+  draggingWelcomeButton.value = null;
+  if (from === null || from === index) return;
+  const [item] = welcomeButtons.value.splice(from, 1);
+  welcomeButtons.value.splice(index, 0, item);
+  welcomeButtons.value.forEach((button, order) => { button.sort_order = order; });
+}
+
+watch(selectedChatId, () => { void loadConfig(); });
 
 onMounted(() => {
   const queryChatID = route.query.chat_id;
@@ -333,6 +377,42 @@ onMounted(() => {
   border-radius: 8px;
   line-height: 1.6;
   background: var(--app-table-header-bg);
+}
+
+.welcome-button-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.welcome-button-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) 130px minmax(160px, 1.4fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px dashed var(--app-border);
+  border-radius: 8px;
+  background: var(--app-table-header-bg);
+  cursor: grab;
+}
+
+.welcome-button-url-hint {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.welcome-button-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .welcome-button-row { grid-template-columns: 1fr 1fr; }
+  .welcome-button-url, .welcome-button-url-hint { grid-column: 1 / -1; }
+  .welcome-button-actions { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 720px) {

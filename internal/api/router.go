@@ -67,6 +67,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			compatSecured.GET("/points/logs/:chatID/:userID", server.ListPointLogs)
 			compatSecured.GET("/admin/config/:chatID", server.GetChatAdminConfig)
 			compatSecured.PUT("/admin/config/:chatID", server.UpdateChatAdminConfig)
+			compatSecured.GET("/admin/welcome-buttons/:chatID", server.ListWelcomeButtons)
+			compatSecured.PUT("/admin/welcome-buttons/:chatID", server.ReplaceWelcomeButtons)
 			compatSecured.GET("/admin/bans/:chatID", server.ListBanLogs)
 			compatSecured.POST("/admin/ban", server.AdminBan)
 			compatSecured.POST("/admin/mute", server.AdminMute)
@@ -123,6 +125,9 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			compatSecured.GET("/point-center/daily-lottery/prizes", server.ListDailyLotteryPrizes)
 			compatSecured.PUT("/point-center/daily-lottery/prizes", server.ReplaceDailyLotteryPrizes)
 			compatSecured.GET("/point-center/daily-lottery/inventory", server.ListDailyLotteryPrizes)
+			compatSecured.GET("/point-center/daily-lottery/codes", server.ListDailyLotteryCodes)
+			compatSecured.GET("/point-center/daily-lottery/codes/summary", server.SummarizeDailyLotteryCodes)
+			compatSecured.POST("/point-center/daily-lottery/codes/import", server.ImportDailyLotteryCodes)
 			compatSecured.GET("/stats/overview", server.StatsOverview)
 			compatSecured.GET("/stats/activity", server.StatsActivity)
 			compatSecured.GET("/stats/points", server.StatsPoints)
@@ -172,6 +177,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			{
 				adminPanel.GET("/config/:chatID", server.GetChatAdminConfig)
 				adminPanel.PUT("/config/:chatID", server.UpdateChatAdminConfig)
+				adminPanel.GET("/welcome-buttons/:chatID", server.ListWelcomeButtons)
+				adminPanel.PUT("/welcome-buttons/:chatID", server.ReplaceWelcomeButtons)
 				adminPanel.GET("/bans/:chatID", server.ListBanLogs)
 				adminPanel.POST("/ban", server.AdminBan)
 				adminPanel.POST("/mute", server.AdminMute)
@@ -289,6 +296,9 @@ func NewRouter(deps Dependencies) *gin.Engine {
 				pointCenter.GET("/daily-lottery/prizes", server.ListDailyLotteryPrizes)
 				pointCenter.PUT("/daily-lottery/prizes", server.ReplaceDailyLotteryPrizes)
 				pointCenter.GET("/daily-lottery/inventory", server.ListDailyLotteryPrizes)
+				pointCenter.GET("/daily-lottery/codes", server.ListDailyLotteryCodes)
+				pointCenter.GET("/daily-lottery/codes/summary", server.SummarizeDailyLotteryCodes)
+				pointCenter.POST("/daily-lottery/codes/import", server.ImportDailyLotteryCodes)
 			}
 
 			auditLogs := secured.Group("/audit-logs")

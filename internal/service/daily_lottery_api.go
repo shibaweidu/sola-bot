@@ -17,6 +17,35 @@ func (s *dailyLotteryAPIService) GetConfig(ctx context.Context, chatID int64) (a
 	return api.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: cfg.DailyAttempts, CostPoints: cfg.CostPoints, GuaranteeOnLast: cfg.GuaranteeOnLast}, nil
 }
 
+func (s *dailyLotteryAPIService) ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]api.DailyLotteryCode, error) {
+	items, err := s.service.ListCodes(ctx, chatID, amount, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.DailyLotteryCode, 0, len(items))
+	for _, item := range items {
+		result = append(result, api.DailyLotteryCode{ID: item.ID, ChatID: item.ChatID, Code: item.Code, Amount: item.Amount, BatchName: item.BatchName, RedeemURL: item.RedeemURL, ExpiresAt: item.ExpiresAt, Status: item.Status, AssignedUser: item.AssignedUser, AssignedAt: item.AssignedAt})
+	}
+	return result, nil
+}
+
+func (s *dailyLotteryAPIService) SummarizeCodes(ctx context.Context, chatID int64) ([]api.DailyLotteryCodeSummary, error) {
+	items, err := s.service.SummarizeCodes(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.DailyLotteryCodeSummary, 0, len(items))
+	for _, item := range items {
+		result = append(result, api.DailyLotteryCodeSummary{Amount: item.Amount, Available: item.Available, Assigned: item.Assigned, Used: item.Used, Total: item.Total})
+	}
+	return result, nil
+}
+
+func (s *dailyLotteryAPIService) ImportCodes(ctx context.Context, req api.DailyLotteryCodeImportRequest) (api.DailyLotteryCodeImportResult, error) {
+	result, err := s.service.ImportCodes(ctx, bot.DailyLotteryCodeImportRequest{ChatID: req.ChatID, Amount: req.Amount, BatchName: req.BatchName, RedeemURL: req.RedeemURL, ExpiresAt: req.ExpiresAt, Codes: req.Codes})
+	return api.DailyLotteryCodeImportResult{Imported: result.Imported, Skipped: result.Skipped}, err
+}
+
 func (s *dailyLotteryAPIService) UpdateConfig(ctx context.Context, req api.DailyLotteryUpdateRequest) (api.DailyLotteryConfig, error) {
 	if _, err := s.ReplacePrizes(ctx, int64(req.ChatID), req.Prizes); err != nil {
 		return api.DailyLotteryConfig{}, err

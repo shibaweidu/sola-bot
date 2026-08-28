@@ -55,6 +55,7 @@ type Dependencies struct {
 	BotMenu               BotMenuService
 	PointCenter           PointCenterService
 	DailyLottery          DailyLotteryAdminService
+	WelcomeButtons        WelcomeButtonAdminService
 	JWT                   JWTConfig
 	Redis                 LoginRateLimiter
 	AllowedOriginSet      []string
@@ -917,6 +918,44 @@ type DailyLotteryAdminService interface {
 	UpdateConfig(ctx context.Context, req DailyLotteryUpdateRequest) (DailyLotteryConfig, error)
 	ListPrizes(ctx context.Context, chatID int64) ([]DailyLotteryPrize, error)
 	ReplacePrizes(ctx context.Context, chatID int64, prizes []DailyLotteryPrizeInput) ([]DailyLotteryPrize, error)
+	ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]DailyLotteryCode, error)
+	SummarizeCodes(ctx context.Context, chatID int64) ([]DailyLotteryCodeSummary, error)
+	ImportCodes(ctx context.Context, req DailyLotteryCodeImportRequest) (DailyLotteryCodeImportResult, error)
+}
+
+type DailyLotteryCode struct {
+	ID           string     `json:"id"`
+	ChatID       int64      `json:"chat_id"`
+	Code         string     `json:"code"`
+	Amount       int        `json:"amount"`
+	BatchName    string     `json:"batch_name"`
+	RedeemURL    string     `json:"redeem_url"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	Status       string     `json:"status"`
+	AssignedUser int64      `json:"assigned_user"`
+	AssignedAt   *time.Time `json:"assigned_at,omitempty"`
+}
+
+type DailyLotteryCodeSummary struct {
+	Amount    int `json:"amount"`
+	Available int `json:"available"`
+	Assigned  int `json:"assigned"`
+	Used      int `json:"used"`
+	Total     int `json:"total"`
+}
+
+type DailyLotteryCodeImportRequest struct {
+	ChatID    int64      `json:"chat_id" binding:"required"`
+	Amount    int        `json:"amount" binding:"required,min=1"`
+	BatchName string     `json:"batch_name"`
+	RedeemURL string     `json:"redeem_url"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Codes     []string   `json:"codes" binding:"required,min=1"`
+}
+
+type DailyLotteryCodeImportResult struct {
+	Imported int `json:"imported"`
+	Skipped  int `json:"skipped"`
 }
 
 type PointCenterReferralResetRequest struct {
@@ -1021,6 +1060,29 @@ type ChatAdminService interface {
 	ListWarns(ctx context.Context, chatID int64, userID int64) ([]WarnRecord, error)
 	ExportUserRows(ctx context.Context, query ExportUserQuery) ([]ExportUserRow, error)
 	BatchUserAction(ctx context.Context, req BatchUserRequest) (*BatchUserResult, error)
+}
+
+type WelcomeButton struct {
+	ID          uint64 `json:"id,omitempty"`
+	ChatID      int64  `json:"chat_id"`
+	Label       string `json:"label"`
+	ActionType  string `json:"action_type"`
+	ActionValue string `json:"action_value"`
+	Enabled     bool   `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+type WelcomeButtonInput struct {
+	Label       string `json:"label"`
+	ActionType  string `json:"action_type"`
+	ActionValue string `json:"action_value"`
+	Enabled     bool   `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+type WelcomeButtonAdminService interface {
+	List(ctx context.Context, chatID int64) ([]WelcomeButton, error)
+	Replace(ctx context.Context, chatID int64, items []WelcomeButtonInput) ([]WelcomeButton, error)
 }
 
 type LotteryService interface {

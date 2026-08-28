@@ -30,6 +30,7 @@ func NewAPIDependencies(cfg config.Config, st *store.Store) api.Dependencies {
 	botMenu := NewBotMenuService(st, cfg.Bot.Token)
 	pointCenter := NewPointCenterService(st, cfg.Bot.Token)
 	dailyLottery := NewDailyLotteryService(st)
+	welcomeButtons := NewWelcomeButtonService(st)
 	return api.Dependencies{
 		Auth:                  admin,
 		BotConfig:             &botConfigService{},
@@ -54,6 +55,7 @@ func NewAPIDependencies(cfg config.Config, st *store.Store) api.Dependencies {
 		BotMenu:               &botMenuAPIService{service: botMenu},
 		PointCenter:           &pointCenterAPIService{service: pointCenter},
 		DailyLottery:          &dailyLotteryAPIService{service: dailyLottery},
+		WelcomeButtons:        &welcomeButtonAPIService{service: welcomeButtons},
 		Redis:                 st.Redis,
 		AllowedOriginSet:      cfg.App.AllowedOrigins,
 		EnableSwagger:         cfg.App.EnableSwagger,

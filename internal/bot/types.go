@@ -86,6 +86,7 @@ type Services struct {
 	Menu           BotMenuService
 	PointCenter    PointCenterService
 	DailyLottery   DailyLotteryService
+	WelcomeButtons WelcomeButtonService
 }
 
 type BotMenuService interface {
@@ -358,6 +359,44 @@ type DailyLotteryService interface {
 	Status(ctx context.Context, chatID, userID int64) (DailyLotteryStatus, error)
 	Draw(ctx context.Context, chatID, userID int64) (DailyLotteryDrawResult, error)
 	History(ctx context.Context, chatID, userID int64, limit int) ([]DailyLotteryAttemptRecord, error)
+	ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]DailyLotteryCode, error)
+	SummarizeCodes(ctx context.Context, chatID int64) ([]DailyLotteryCodeSummary, error)
+	ImportCodes(ctx context.Context, req DailyLotteryCodeImportRequest) (DailyLotteryCodeImportResult, error)
+}
+
+type DailyLotteryCode struct {
+	ID           string
+	ChatID       int64
+	Code         string
+	Amount       int
+	BatchName    string
+	RedeemURL    string
+	ExpiresAt    *time.Time
+	Status       string
+	AssignedUser int64
+	AssignedAt   *time.Time
+}
+
+type DailyLotteryCodeSummary struct {
+	Amount    int
+	Available int
+	Assigned  int
+	Used      int
+	Total     int
+}
+
+type DailyLotteryCodeImportRequest struct {
+	ChatID    int64
+	Amount    int
+	BatchName string
+	RedeemURL string
+	ExpiresAt *time.Time
+	Codes     []string
+}
+
+type DailyLotteryCodeImportResult struct {
+	Imported int
+	Skipped  int
 }
 
 type ChatAdminConfig struct {
@@ -381,6 +420,29 @@ type ChatAdminConfig struct {
 	ForceSubscribeKickMessage   string
 	ForceSubscribeChannelLabels string
 	RulesText                   string
+}
+
+type WelcomeButton struct {
+	ID          uint64
+	ChatID      int64
+	Label       string
+	ActionType  string
+	ActionValue string
+	Enabled     bool
+	SortOrder   int
+}
+
+type WelcomeButtonInput struct {
+	Label       string
+	ActionType  string
+	ActionValue string
+	Enabled     bool
+	SortOrder   int
+}
+
+type WelcomeButtonService interface {
+	List(ctx context.Context, chatID int64) ([]WelcomeButton, error)
+	Replace(ctx context.Context, chatID int64, items []WelcomeButtonInput) ([]WelcomeButton, error)
 }
 
 type ChatAdminConfigPatch struct {

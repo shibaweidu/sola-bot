@@ -5,6 +5,7 @@ import type {
   ChatAdminConfig,
   ChatAdminConfigPayload,
   ChatID,
+  WelcomeButton,
   MutePayload,
   WarnRecord,
 } from "@/types/api";
@@ -24,6 +25,17 @@ export function updateAdminConfig(
   return request<ChatAdminConfig>(`/admin/config/${encodeId(chatId)}`, {
     method: "PUT",
     body: payload,
+  });
+}
+
+export function fetchWelcomeButtons(chatId: ChatID): Promise<{ items: WelcomeButton[] }> {
+  return request<{ items: WelcomeButton[] }>(`/admin/welcome-buttons/${encodeId(chatId)}`);
+}
+
+export function updateWelcomeButtons(chatId: ChatID, items: WelcomeButton[]): Promise<{ items: WelcomeButton[] }> {
+  return request<{ items: WelcomeButton[] }>(`/admin/welcome-buttons/${encodeId(chatId)}`, {
+    method: "PUT",
+    body: { items },
   });
 }
 

@@ -61,5 +61,7 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 		&model.DailyLotteryConfig{},
 		&model.DailyLotteryPrize{},
 		&model.DailyLotteryAttempt{},
+		&model.DailyLotteryCode{},
+		&model.WelcomeButton{},
 	)
 }

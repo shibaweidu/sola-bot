@@ -37,6 +37,7 @@ type Bundle struct {
 	BotMenu         *BotMenuService
 	PointCenter     *PointCenterService
 	DailyLottery    *DailyLotteryService
+	WelcomeButtons  *WelcomeButtonService
 }
 
 func NewBundle(st *store.Store, redisClient *redis.Client) *Bundle {
@@ -65,6 +66,7 @@ func NewBundleWithBotToken(st *store.Store, redisClient *redis.Client, botToken 
 		BotMenu:         NewBotMenuService(st, botToken),
 		PointCenter:     NewPointCenterService(st, botToken),
 		DailyLottery:    NewDailyLotteryService(st),
+		WelcomeButtons:  NewWelcomeButtonService(st),
 	}
 }
 
@@ -90,6 +92,7 @@ func (b *Bundle) BotServices() bot.Services {
 		Menu:           b.BotMenu,
 		PointCenter:    b.PointCenter,
 		DailyLottery:   b.DailyLottery,
+		WelcomeButtons: b.WelcomeButtons,
 	}
 }
 

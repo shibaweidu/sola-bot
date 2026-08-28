@@ -226,6 +226,16 @@ export interface ChatAdminConfig {
 
 export type ChatAdminConfigPayload = Omit<ChatAdminConfig, "chat_id" | "updated_at">;
 
+export interface WelcomeButton {
+  id?: number;
+  chat_id: ChatID;
+  label: string;
+  action_type: "daily_lottery" | "link";
+  action_value: string;
+  enabled: boolean;
+  sort_order: number;
+}
+
 export interface BanRecord {
   id: ChatID;
   user_id: ChatID;

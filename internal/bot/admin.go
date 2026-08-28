@@ -372,11 +372,47 @@ func (a *App) postWelcomeMessage(b *gotgbot.Bot, ctx *ext.Context, chatID int64,
 		name = strconv.FormatInt(user.Id, 10)
 	}
 	text := strings.ReplaceAll(cfg.WelcomeText, "{name}", name)
-	msg, err := b.SendMessageWithContext(requestScope(ctx).Context, chatID, text, nil)
+	var opts *gotgbot.SendMessageOpts
+	if a.services.WelcomeButtons != nil {
+		if buttons, buttonErr := a.services.WelcomeButtons.List(requestScope(ctx).Context, chatID); buttonErr != nil {
+			log.Printf("welcome buttons load failed: chat=%d error=%v", chatID, buttonErr)
+		} else if markup := a.welcomeButtonsMarkup(b, chatID, buttons); len(markup.InlineKeyboard) > 0 {
+			opts = &gotgbot.SendMessageOpts{ReplyMarkup: markup}
+		}
+	}
+	msg, err := b.SendMessageWithContext(requestScope(ctx).Context, chatID, text, opts)
 	if err == nil && msg != nil && cfg.WelcomeDeleteSecs > 0 {
 		go deleteMessageLater(b, chatID, msg.MessageId, time.Duration(cfg.WelcomeDeleteSecs)*time.Second)
 	}
 	return err
+}
+
+func (a *App) welcomeButtonsMarkup(b *gotgbot.Bot, chatID int64, buttons []WelcomeButton) gotgbot.InlineKeyboardMarkup {
+	rows := make([][]gotgbot.InlineKeyboardButton, 0, len(buttons))
+	for _, item := range buttons {
+		if !item.Enabled {
+			continue
+		}
+		label := strings.TrimSpace(item.Label)
+		if label == "" {
+			continue
+		}
+		button := gotgbot.InlineKeyboardButton{Text: label}
+		switch item.ActionType {
+		case model.WelcomeButtonDailyLottery:
+			username := strings.TrimPrefix(strings.TrimSpace(b.User.Username), "@")
+			if username == "" {
+				continue
+			}
+			button.Url = fmt.Sprintf("https://t.me/%s?start=dl_%d", username, chatID)
+		case model.WelcomeButtonLink:
+			button.Url = strings.TrimSpace(item.ActionValue)
+		default:
+			continue
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{button})
+	}
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 const defaultReferralSuccessText = "🎉 入群成功！\n\n你已获得：+{invitee_points} 积分\n当前积分：{points}\n\n积分可兑换额度，免费领取更多权益。"

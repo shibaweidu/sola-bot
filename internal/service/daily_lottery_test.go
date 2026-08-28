@@ -23,7 +23,7 @@ func TestDailyLotteryDrawAndDailyLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	code := model.ExchangeCode{BaseModel: model.BaseModel{ID: uuid.New(), CreatedAt: now, UpdatedAt: now}, Code: "DAILY-10", Amount: 10, Status: "available"}
+	code := model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "DAILY-10", Amount: 10, Status: "available", CreatedAt: now, UpdatedAt: now}
 	if err := st.DB.Create(&code).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestDailyLotteryLastAttemptGuarantee(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	if err := st.DB.Create(&model.ExchangeCode{BaseModel: model.BaseModel{ID: uuid.New(), CreatedAt: now, UpdatedAt: now}, Code: "DAILY-50", Amount: 50, Status: "available"}).Error; err != nil {
+	if err := st.DB.Create(&model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "DAILY-50", Amount: 50, Status: "available", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{{Amount: 50, Weight: 1, Enabled: true}}); err != nil {
@@ -92,5 +92,7 @@ func createDailyLotteryTables(t *testing.T, db *gorm.DB) {
 		`CREATE UNIQUE INDEX idx_daily_lottery_prize_chat_amount ON daily_lottery_prizes(chat_id, amount)`,
 		`CREATE TABLE daily_lottery_attempts (id integer PRIMARY KEY AUTOINCREMENT, chat_id integer NOT NULL, user_id integer NOT NULL, draw_date text NOT NULL, attempt_no integer NOT NULL, result text NOT NULL, amount integer NOT NULL DEFAULT 0, code_id text, cost_points integer NOT NULL DEFAULT 0, created_at datetime)`,
 		`CREATE UNIQUE INDEX idx_daily_lottery_attempt ON daily_lottery_attempts(chat_id, user_id, draw_date, attempt_no)`,
+		`CREATE TABLE daily_lottery_codes (id text PRIMARY KEY, chat_id integer NOT NULL, code text NOT NULL, amount integer NOT NULL, batch_name text NOT NULL DEFAULT '', redeem_url text NOT NULL DEFAULT '', expires_at datetime, status text NOT NULL DEFAULT 'available', assigned_user integer NOT NULL DEFAULT 0, assigned_at datetime, created_at datetime, updated_at datetime)`,
+		`CREATE UNIQUE INDEX idx_daily_lottery_codes_chat_code ON daily_lottery_codes(chat_id, code)`,
 	)
 }

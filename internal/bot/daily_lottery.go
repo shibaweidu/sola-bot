@@ -46,6 +46,28 @@ func (a *App) routeDailyLotteryCallback(b *gotgbot.Bot, ctx *ext.Context, payloa
 	}
 	switch payload.Action {
 	case "draw":
+		if ctx.EffectiveUser == nil {
+			return sendText(b, ctx, "无法识别当前用户，请重新打开抽奖面板。", nil)
+		}
+		member, memberErr := b.GetChatMemberWithContext(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID, nil)
+		if memberErr != nil || !chatMemberPresent(member) {
+			return sendText(b, ctx, "请先加入当前目标群组后再参加抽奖。", nil)
+		}
+		if a.services.Admin != nil {
+			cfg, cfgErr := a.services.Admin.GetConfig(requestScope(ctx).Context, chatID)
+			if cfgErr != nil {
+				return cfgErr
+			}
+			if forceSubscribeConfigured(cfg) {
+				subscribed, missing, checkErr := a.checkForceSubscription(requestScope(ctx).Context, b, cfg, requestScope(ctx).Actor.ID, true)
+				if checkErr != nil {
+					return sendText(b, ctx, "订阅状态暂时无法核验，请稍后重试。", nil)
+				}
+				if !subscribed {
+					return sendText(b, ctx, forceSubscribeMuteText(cfg, *ctx.EffectiveUser, missing), &gotgbot.SendMessageOpts{ReplyMarkup: forceSubscribeMarkup(cfg, chatID, requestScope(ctx).Actor.ID)})
+				}
+			}
+		}
 		result, err := a.services.DailyLottery.Draw(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID)
 		if err != nil {
 			return sendText(b, ctx, "抽奖失败："+err.Error(), nil)

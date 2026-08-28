@@ -70,7 +70,7 @@ func (s *DailyLotteryService) ListPrizes(ctx context.Context, chatID int64) ([]b
 	items := make([]bot.DailyLotteryPrize, 0, len(rows))
 	for _, row := range rows {
 		item := bot.DailyLotteryPrize{ID: row.ID, ChatID: row.ChatID, Amount: row.Amount, Weight: row.Weight, Enabled: row.Enabled}
-		available, err := s.availableCount(ctx, row.Amount)
+		available, err := s.availableCount(ctx, chatID, row.Amount)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func (s *DailyLotteryService) ReplacePrizes(ctx context.Context, chatID int64, p
 		return prizes, nil
 	}
 	for _, prize := range prizes {
-		available, err := s.availableCount(ctx, prize.Amount)
+		available, err := s.availableCount(ctx, chatID, prize.Amount)
 		if err != nil {
 			return nil, err
 		}
@@ -215,13 +215,13 @@ func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (b
 			result.Remaining = dailyLotteryAttempts - attemptNo
 			return nil
 		}
-		var code model.ExchangeCode
-		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("status = ? AND amount = ? AND (expires_at IS NULL OR expires_at > ?)", "available", selected.Amount, time.Now()).Order("created_at asc")
+		var code model.DailyLotteryCode
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("chat_id = ? AND status = ? AND amount = ? AND (expires_at IS NULL OR expires_at > ?)", chatID, "available", selected.Amount, time.Now()).Order("created_at asc")
 		if err := query.First(&code).Error; err != nil {
 			return errors.New("该额度兑换码刚刚被领完，请重新抽奖")
 		}
 		assignedAt := time.Now()
-		if err := tx.Model(&model.ExchangeCode{}).Where("id = ? AND status = ?", code.ID, "available").Updates(map[string]any{"status": "assigned", "assigned_user": userID, "assigned_chat": chatID, "assigned_at": assignedAt, "updated_at": assignedAt}).Error; err != nil {
+		if err := tx.Model(&model.DailyLotteryCode{}).Where("id = ? AND status = ?", code.ID, "available").Updates(map[string]any{"status": "assigned", "assigned_user": userID, "assigned_at": assignedAt, "updated_at": assignedAt}).Error; err != nil {
 			return err
 		}
 		codeID := uuid.UUID(code.ID)
@@ -264,7 +264,7 @@ func dailyLotteryAvailablePrizes(tx *gorm.DB, chatID int64) ([]bot.DailyLotteryP
 	items := make([]bot.DailyLotteryPrize, 0, len(prizes))
 	for _, prize := range prizes {
 		var count int64
-		if err := tx.Model(&model.ExchangeCode{}).Where("status = ? AND amount = ? AND (expires_at IS NULL OR expires_at > ?)", "available", prize.Amount, time.Now()).Count(&count).Error; err != nil {
+		if err := tx.Model(&model.DailyLotteryCode{}).Where("chat_id = ? AND status = ? AND amount = ? AND (expires_at IS NULL OR expires_at > ?)", chatID, "available", prize.Amount, time.Now()).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		if count > 0 {
@@ -275,12 +275,12 @@ func dailyLotteryAvailablePrizes(tx *gorm.DB, chatID int64) ([]bot.DailyLotteryP
 	return items, nil
 }
 
-func (s *DailyLotteryService) availableCount(ctx context.Context, amount int) (int, error) {
+func (s *DailyLotteryService) availableCount(ctx context.Context, chatID int64, amount int) (int, error) {
 	var count int64
 	if s == nil || s.store == nil || s.store.DB == nil {
 		return 0, nil
 	}
-	err := s.store.DB.WithContext(ctx).Model(&model.ExchangeCode{}).Where("status = ? AND amount = ? AND (expires_at IS NULL OR expires_at > ?)", "available", amount, time.Now()).Count(&count).Error
+	err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryCode{}).Where("chat_id = ? AND status = ? AND amount = ? AND (expires_at IS NULL OR expires_at > ?)", chatID, "available", amount, time.Now()).Count(&count).Error
 	return int(count), err
 }
 
