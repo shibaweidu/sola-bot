@@ -539,12 +539,14 @@ function selectDailyAmount(amount?: number): void {
 }
 
 async function importDailyInventory(): Promise<void> {
-  if (!selectedChatId.value || !Number.isSafeInteger(Number(dailyInventory.amountInput)) || dailyInventory.amountInput <= 0) { ElMessage.warning("请输入有效额度"); return; }
+  const chatID = parseNumericId(selectedChatId.value);
+  if (chatID === undefined || !Number.isSafeInteger(chatID)) { ElMessage.warning("请选择有效群组"); return; }
+  if (!Number.isSafeInteger(Number(dailyInventory.amountInput)) || dailyInventory.amountInput <= 0) { ElMessage.warning("请输入有效额度"); return; }
   const codes = dailyInventory.codes.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
   if (!codes.length) { ElMessage.warning("请每行填写一个兑换码"); return; }
   inventoryImporting.value = true;
   try {
-    const result = await importDailyLotteryCodes({ chat_id: selectedChatId.value, amount: Number(dailyInventory.amountInput), batch_name: dailyInventory.batchName.trim(), redeem_url: dailyInventory.redeemURL.trim(), codes });
+    const result = await importDailyLotteryCodes({ chat_id: chatID, amount: Number(dailyInventory.amountInput), batch_name: dailyInventory.batchName.trim(), redeem_url: dailyInventory.redeemURL.trim(), codes });
     ElMessage.success(`导入 ${result.imported} 个，跳过 ${result.skipped} 个`);
     dailyInventory.codes = "";
     await loadDailyInventory();
@@ -554,7 +556,8 @@ async function importDailyInventory(): Promise<void> {
 }
 
 async function saveDailyLottery(): Promise<void> {
-  if (!selectedChatId.value) {
+  const chatID = parseNumericId(selectedChatId.value);
+  if (chatID === undefined || !Number.isSafeInteger(chatID)) {
     ElMessage.warning("请先选择群组");
     return;
   }
@@ -574,7 +577,7 @@ async function saveDailyLottery(): Promise<void> {
   dailySaving.value = true;
   try {
     await updateDailyLottery({
-      chat_id: selectedChatId.value,
+      chat_id: chatID,
       enabled: dailyForm.enabled,
       cost_points: dailyForm.cost_points,
       guarantee_on_last: dailyForm.guarantee_on_last,
