@@ -915,7 +915,7 @@ type DailyLotteryUpdateRequest struct {
 	CostPoints      int                      `json:"cost_points" binding:"gte=0"`
 	PaidEnabled     bool                     `json:"paid_enabled"`
 	GuaranteeOnLast bool                     `json:"guarantee_on_last"`
-	Prizes          []DailyLotteryPrizeInput `json:"prizes" binding:"required,min=1"`
+	Prizes          []DailyLotteryPrizeInput `json:"prizes"`
 }
 
 type DailyLotteryAdminService interface {

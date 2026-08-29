@@ -38,12 +38,22 @@ func TestDailyLotteryMarkupKeepsDrawButtonAfterWin(t *testing.T) {
 }
 
 func TestDailyLotteryUserResultHidesPrizeDetails(t *testing.T) {
-	text := formatDailyLotteryResult(DailyLotteryDrawResult{Result: "won", Amount: 100, Code: "SECRET", RedeemURL: "https://example.com/redeem", Remaining: 2})
-	if !strings.Contains(text, "兑换码已发放") || !strings.Contains(text, "兑换地址：https://example.com/redeem") {
+	text := formatDailyLotteryResult(DailyLotteryDrawResult{Result: "won", Amount: 100, Code: "SECRET", RedeemURL: "https://example.com/redeem", Remaining: 2, Guaranteed: true})
+	if !strings.Contains(text, "兑换码将单独发送") || !strings.Contains(text, "兑换地址：https://example.com/redeem") {
 		t.Fatalf("result text missing user-facing guidance: %s", text)
 	}
-	if strings.Contains(text, "100") || strings.Contains(text, "额度") || strings.Contains(text, "SECRET") {
+	if strings.Contains(text, "100") || strings.Contains(text, "额度") || strings.Contains(text, "SECRET") || strings.Contains(text, "保底") {
 		t.Fatalf("result text exposes prize details or code: %s", text)
+	}
+}
+
+func TestDailyLotteryLossResultIsStandaloneMessageText(t *testing.T) {
+	text := formatDailyLotteryResult(DailyLotteryDrawResult{Result: "lost", Remaining: 1})
+	if !strings.Contains(text, "本次未中奖") || !strings.Contains(text, "本次免费抽奖") {
+		t.Fatalf("loss result missing draw explanation: %s", text)
+	}
+	if strings.Contains(text, "保底") || strings.Contains(text, "概率") || strings.Contains(text, "库存") {
+		t.Fatalf("loss result exposes internal lottery details: %s", text)
 	}
 }
 

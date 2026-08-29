@@ -146,6 +146,7 @@ func (s *DailyLotteryService) ImportCodes(ctx context.Context, req bot.DailyLott
 	}
 	result := bot.DailyLotteryCodeImportResult{Skipped: duplicateCount}
 	err := s.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		importedAmount := false
 		for _, code := range codes {
 			var count int64
 			if err := tx.Model(&model.DailyLotteryCode{}).Where("chat_id = ? AND code = ?", req.ChatID, code).Count(&count).Error; err != nil {
@@ -166,6 +167,14 @@ func (s *DailyLotteryService) ImportCodes(ctx context.Context, req bot.DailyLott
 				continue
 			}
 			result.Imported++
+			importedAmount = true
+		}
+		if importedAmount {
+			// Inventory import is the explicit event that may create a missing
+			// prize. This keeps manual prize deletion persistent across reads.
+			if err := ensureInventoryPrize(tx, req.ChatID, req.Amount); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

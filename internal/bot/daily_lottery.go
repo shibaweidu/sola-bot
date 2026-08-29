@@ -47,10 +47,12 @@ func (a *App) routeDailyLotteryCallback(b *gotgbot.Bot, ctx *ext.Context, payloa
 	switch payload.Action {
 	case "draw":
 		if ctx.EffectiveUser == nil {
+			_ = answerCallback(b, ctx, "无法识别当前用户")
 			return sendText(b, ctx, "无法识别当前用户，请重新打开抽奖面板。", nil)
 		}
 		member, memberErr := b.GetChatMemberWithContext(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID, nil)
 		if memberErr != nil || !chatMemberPresent(member) {
+			_ = answerCallback(b, ctx, "请先加入目标群组")
 			return sendText(b, ctx, "请先加入当前目标群组后再参加抽奖。", nil)
 		}
 		if a.services.Admin != nil {
@@ -61,17 +63,30 @@ func (a *App) routeDailyLotteryCallback(b *gotgbot.Bot, ctx *ext.Context, payloa
 			if forceSubscribeConfigured(cfg) {
 				subscribed, missing, checkErr := a.checkForceSubscription(requestScope(ctx).Context, b, cfg, requestScope(ctx).Actor.ID, true)
 				if checkErr != nil {
+					_ = answerCallback(b, ctx, "订阅状态暂时无法核验")
 					return sendText(b, ctx, "订阅状态暂时无法核验，请稍后重试。", nil)
 				}
 				if !subscribed {
+					_ = answerCallback(b, ctx, "请先完成频道订阅")
 					return sendText(b, ctx, forceSubscribeMuteText(cfg, *ctx.EffectiveUser, missing), &gotgbot.SendMessageOpts{ReplyMarkup: forceSubscribeMarkup(cfg, chatID, requestScope(ctx).Actor.ID)})
 				}
 			}
 		}
 		result, err := a.services.DailyLottery.Draw(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID)
 		if err != nil {
+			_ = answerCallback(b, ctx, "抽奖未完成")
 			return sendText(b, ctx, "抽奖失败："+err.Error(), nil)
 		}
+		// A draw callback creates a new result message so every attempt remains
+		// visible in the conversation. Remove only the old message's buttons to
+		// prevent stale panels from triggering duplicate-looking draws.
+		if ctx.CallbackQuery != nil && ctx.EffectiveChat != nil && ctx.EffectiveMessage != nil {
+			_, _, _ = b.EditMessageReplyMarkupWithContext(requestScope(ctx).Context, &gotgbot.EditMessageReplyMarkupOpts{
+				ChatId: ctx.EffectiveChat.Id, MessageId: ctx.EffectiveMessage.MessageId,
+				ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: [][]gotgbot.InlineKeyboardButton{}},
+			})
+		}
+		_ = answerCallback(b, ctx, "抽奖结果已生成")
 		status, statusErr := a.services.DailyLottery.Status(requestScope(ctx).Context, chatID, requestScope(ctx).Actor.ID)
 		if statusErr != nil {
 			if err := sendText(b, ctx, formatDailyLotteryResult(result), nil); err != nil {
@@ -82,7 +97,7 @@ func (a *App) routeDailyLotteryCallback(b *gotgbot.Bot, ctx *ext.Context, payloa
 			}
 			return nil
 		}
-		if err := respondText(b, ctx, formatDailyLotteryResult(result), dailyLotteryMarkup(chatID, status)); err != nil {
+		if err := sendText(b, ctx, formatDailyLotteryResult(result), dailyLotteryMarkup(chatID, status)); err != nil {
 			return err
 		}
 		if result.Result == "won" {
@@ -176,14 +191,11 @@ func formatDailyLotteryResult(result DailyLotteryDrawResult) string {
 	}
 	lines := []string{
 		"🎉 恭喜你中奖！",
-		"兑换码已发放，请复制下方兑换码。",
+		"本次抽奖已完成，兑换码将单独发送。",
 		costText,
 	}
 	if result.RedeemURL != "" {
 		lines = append(lines, "兑换地址："+result.RedeemURL)
-	}
-	if result.Guaranteed {
-		lines = append(lines, "", "本次为第 3 次保底中奖。")
 	}
 	lines = append(lines, "", fmt.Sprintf("今日免费剩余次数：%d", result.Remaining))
 	return strings.Join(lines, "\n")

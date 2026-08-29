@@ -20,7 +20,7 @@
       <el-form label-position="top" class="daily-form">
         <div class="daily-switches">
           <div class="daily-switch-row"><span>开启每日额度抽奖</span><el-switch v-model="dailyForm.enabled" /></div>
-          <div class="daily-switch-row"><span>第 3 次未中奖时强制发码</span><el-switch v-model="dailyForm.guarantee_on_last" /></div>
+          <div class="daily-switch-row"><span>第 3 次未中奖时发放奖品</span><el-switch v-model="dailyForm.guarantee_on_last" /></div>
           <div class="daily-switch-row"><span>开启积分抽奖</span><el-switch v-model="dailyForm.paid_enabled" /></div>
           <div class="daily-fixed-row"><span>每日次数</span><strong>3 次（固定）</strong></div>
         </div>
@@ -670,10 +670,10 @@ async function saveDailyLottery(): Promise<void> {
     seen.add(amount);
     if (!Number.isSafeInteger(weight) || weight < 1 || weight > 1000) { ElMessage.warning("权重必须在 1 到 1000 之间"); return; }
   }
-  if (!dailyPrizes.value.length || dailyWeightTotal.value <= 0 || dailyWeightTotal.value > 1000) {
-    ElMessage.warning("请配置至少一个奖池，启用权重合计不能超过 1000");
-    return;
-  }
+	if (dailyPrizes.value.length > 0 && (dailyWeightTotal.value <= 0 || dailyWeightTotal.value > 1000)) {
+		ElMessage.warning("启用奖池权重合计不能超过 1000");
+		return;
+	}
   if (dailyForm.paid_enabled && (!Number.isSafeInteger(Number(dailyForm.cost_points)) || Number(dailyForm.cost_points) <= 0)) {
     ElMessage.warning("开启积分抽奖后，请设置大于 0 的积分消耗");
     return;

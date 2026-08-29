@@ -84,6 +84,38 @@ func TestDailyLotteryLastAttemptGuarantee(t *testing.T) {
 	}
 }
 
+func TestDailyLotteryLastAttemptCanDisableGuarantee(t *testing.T) {
+	ctx := context.Background()
+	st := newServiceTestStore(t)
+	createPointTables(t, st.DB)
+	createPointCenterTables(t, st.DB)
+	createDailyLotteryTables(t, st.DB)
+	svc := NewDailyLotteryService(st)
+	if _, err := svc.UpdateConfig(ctx, bot.DailyLotteryConfig{ChatID: 1001, Enabled: true, GuaranteeOnLast: false}); err != nil {
+		t.Fatal(err)
+	}
+	date := time.Now().In(chinaLocation()).Format("2006-01-02")
+	for i := 1; i <= 2; i++ {
+		if err := st.DB.Create(&model.DailyLotteryAttempt{ChatID: 1001, UserID: 2005, DrawDate: date, AttemptNo: i, Result: "lost"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	if err := st.DB.Create(&model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "NO-GUARANTEE", Amount: 50, Status: "available", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{{Amount: 50, Weight: 1, Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Draw(ctx, 1001, 2005)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Guaranteed {
+		t.Fatalf("guarantee should be disabled, result = %+v", result)
+	}
+}
+
 func TestDailyLotteryPaidDrawAndReset(t *testing.T) {
 	ctx := context.Background()
 	st := newServiceTestStore(t)
@@ -134,13 +166,38 @@ func TestDailyLotterySyncsNewInventoryAmounts(t *testing.T) {
 	createPointCenterTables(t, st.DB)
 	createDailyLotteryTables(t, st.DB)
 	svc := NewDailyLotteryService(st)
-	now := time.Now()
-	if err := st.DB.Create(&model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "NEW-1", Amount: 1, Status: "available", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatal(err)
+	result, err := svc.ImportCodes(ctx, bot.DailyLotteryCodeImportRequest{ChatID: 1001, Amount: 1, Codes: []string{"NEW-1"}})
+	if err != nil || result.Imported != 1 {
+		t.Fatalf("import inventory = %+v, err=%v", result, err)
 	}
 	prizes, err := svc.ListPrizes(ctx, 1001)
 	if err != nil || len(prizes) != 1 || prizes[0].Amount != 1 || prizes[0].AvailableCode != 1 {
-		t.Fatalf("synced prizes = %+v, err=%v", prizes, err)
+		t.Fatalf("imported prizes = %+v, err=%v", prizes, err)
+	}
+	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{}); err != nil {
+		t.Fatalf("delete prizes = %v", err)
+	}
+	prizes, err = svc.ListPrizes(ctx, 1001)
+	if err != nil || len(prizes) != 0 {
+		t.Fatalf("deleted prizes restored = %+v, err=%v", prizes, err)
+	}
+	// Re-importing only an existing code must not recreate a manually deleted
+	// prize. A genuinely new code for the amount may recreate it.
+	result, err = svc.ImportCodes(ctx, bot.DailyLotteryCodeImportRequest{ChatID: 1001, Amount: 1, Codes: []string{"NEW-1"}})
+	if err != nil || result.Imported != 0 {
+		t.Fatalf("duplicate import = %+v, err=%v", result, err)
+	}
+	prizes, _ = svc.ListPrizes(ctx, 1001)
+	if len(prizes) != 0 {
+		t.Fatalf("duplicate import restored prize = %+v", prizes)
+	}
+	result, err = svc.ImportCodes(ctx, bot.DailyLotteryCodeImportRequest{ChatID: 1001, Amount: 1, Codes: []string{"NEW-2"}})
+	if err != nil || result.Imported != 1 {
+		t.Fatalf("new import = %+v, err=%v", result, err)
+	}
+	prizes, _ = svc.ListPrizes(ctx, 1001)
+	if len(prizes) != 1 || prizes[0].Amount != 1 {
+		t.Fatalf("new import did not restore prize = %+v", prizes)
 	}
 	// A depleted/configured amount remains editable and does not block saving
 	// another amount that currently has inventory.

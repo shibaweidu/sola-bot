@@ -78,7 +78,7 @@ func (s *Server) ReplaceDailyLotteryPrizes(c *gin.Context) {
 	}
 	var req struct {
 		ChatID int                      `json:"chat_id" binding:"required"`
-		Items  []DailyLotteryPrizeInput `json:"items" binding:"required,min=1"`
+		Items  []DailyLotteryPrizeInput `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())

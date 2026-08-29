@@ -70,6 +70,8 @@ func TestDailyLotteryInventoryBatchOperations(t *testing.T) {
 func createDailyLotteryInventoryTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	execSQL(t, db,
+		`CREATE TABLE daily_lottery_prizes (id integer PRIMARY KEY AUTOINCREMENT, chat_id integer NOT NULL, amount integer NOT NULL, weight integer NOT NULL DEFAULT 1, enabled boolean NOT NULL DEFAULT true, created_at datetime, updated_at datetime)`,
+		`CREATE UNIQUE INDEX idx_daily_lottery_prize_chat_amount ON daily_lottery_prizes(chat_id, amount)`,
 		`CREATE TABLE daily_lottery_codes (id text PRIMARY KEY, chat_id integer NOT NULL, code text NOT NULL, amount integer NOT NULL, batch_name text NOT NULL DEFAULT '', redeem_url text NOT NULL DEFAULT '', expires_at datetime, status text NOT NULL DEFAULT 'available', assigned_user integer NOT NULL DEFAULT 0, assigned_at datetime, created_at datetime, updated_at datetime)`,
 		`CREATE UNIQUE INDEX idx_daily_lottery_codes_chat_code ON daily_lottery_codes(chat_id, code)`,
 	)

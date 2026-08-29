@@ -56,7 +56,14 @@ func (s *DailyLotteryService) UpdateConfig(ctx context.Context, cfg bot.DailyLot
 	}
 	now := time.Now()
 	row := model.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: dailyLotteryAttempts, CostPoints: cfg.CostPoints, PaidEnabled: cfg.PaidEnabled, GuaranteeOnLast: cfg.GuaranteeOnLast, CreatedAt: now, UpdatedAt: now}
-	if err := s.store.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "chat_id"}}, DoUpdates: clause.AssignmentColumns([]string{"enabled", "daily_attempts", "cost_points", "paid_enabled", "guarantee_on_last", "updated_at"})}).Create(&row).Error; err != nil {
+	// Use a map for the upsert so an explicit false value is not replaced by
+	// GORM's `default:true` model tag during INSERT.
+	values := map[string]any{
+		"chat_id": cfg.ChatID, "enabled": cfg.Enabled, "daily_attempts": dailyLotteryAttempts,
+		"cost_points": cfg.CostPoints, "paid_enabled": cfg.PaidEnabled,
+		"guarantee_on_last": cfg.GuaranteeOnLast, "created_at": now, "updated_at": now,
+	}
+	if err := s.store.DB.WithContext(ctx).Table("daily_lottery_configs").Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "chat_id"}}, DoUpdates: clause.AssignmentColumns([]string{"enabled", "daily_attempts", "cost_points", "paid_enabled", "guarantee_on_last", "updated_at"})}).Create(values).Error; err != nil {
 		return bot.DailyLotteryConfig{}, err
 	}
 	return dailyLotteryConfigToBot(row), nil
@@ -65,9 +72,6 @@ func (s *DailyLotteryService) UpdateConfig(ctx context.Context, cfg bot.DailyLot
 func (s *DailyLotteryService) ListPrizes(ctx context.Context, chatID int64) ([]bot.DailyLotteryPrize, error) {
 	if s == nil || s.store == nil || s.store.DB == nil {
 		return []bot.DailyLotteryPrize{}, nil
-	}
-	if err := s.syncInventoryPrizes(ctx, chatID); err != nil {
-		return nil, err
 	}
 	var rows []model.DailyLotteryPrize
 	if err := s.store.DB.WithContext(ctx).Where("chat_id = ?", chatID).Order("amount asc").Find(&rows).Error; err != nil {
@@ -107,10 +111,7 @@ func (s *DailyLotteryService) ReplacePrizes(ctx context.Context, chatID int64, p
 			totalWeight += prize.Weight
 		}
 	}
-	if len(prizes) == 0 {
-		return nil, errors.New("至少配置一个奖池")
-	}
-	if totalWeight <= 0 {
+	if len(prizes) > 0 && totalWeight <= 0 {
 		return nil, errors.New("至少启用一个有效奖池")
 	}
 	if totalWeight > 1000 {
@@ -137,53 +138,35 @@ func (s *DailyLotteryService) ReplacePrizes(ctx context.Context, chatID int64, p
 	return s.ListPrizes(ctx, chatID)
 }
 
-// syncInventoryPrizes makes newly imported inventory visible in the prize
-// editor without overwriting existing weights or enabled flags. New amounts
-// start enabled with a conservative default weight and can be adjusted in the
-// admin UI before saving the pool.
-func (s *DailyLotteryService) syncInventoryPrizes(ctx context.Context, chatID int64) error {
-	if s == nil || s.store == nil || s.store.DB == nil || chatID == 0 {
+// ensureInventoryPrize creates a default prize only for an amount that was
+// explicitly imported into the inventory. Reads and draws never call this.
+func ensureInventoryPrize(tx *gorm.DB, chatID int64, amount int) error {
+	if tx == nil || chatID == 0 || amount <= 0 {
 		return nil
 	}
-	var amounts []int
-	if err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryCode{}).
-		Where("chat_id = ?", chatID).Distinct("amount").Pluck("amount", &amounts).Error; err != nil {
+	var count int64
+	if err := tx.Model(&model.DailyLotteryPrize{}).
+		Where("chat_id = ? AND amount = ?", chatID, amount).Count(&count).Error; err != nil {
 		return err
 	}
+	if count > 0 {
+		return nil
+	}
 	var enabledWeight int64
-	if err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryPrize{}).
+	if err := tx.Model(&model.DailyLotteryPrize{}).
 		Where("chat_id = ? AND enabled = ?", chatID, true).Select("COALESCE(SUM(weight), 0)").Scan(&enabledWeight).Error; err != nil {
 		return err
 	}
-	for _, amount := range amounts {
-		if amount <= 0 {
-			continue
-		}
-		var count int64
-		if err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryPrize{}).
-			Where("chat_id = ? AND amount = ?", chatID, amount).Count(&count).Error; err != nil {
-			return err
-		}
-		if count > 0 {
-			continue
-		}
-		weight := 100
-		enabled := true
-		if enabledWeight >= 1000 {
-			enabled = false
-			weight = 1
-		} else if remaining := int(1000 - enabledWeight); remaining < weight {
-			weight = remaining
-		}
-		row := model.DailyLotteryPrize{ChatID: chatID, Amount: amount, Weight: weight, Enabled: enabled, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-		if err := s.store.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-			return err
-		}
-		if enabled {
-			enabledWeight += int64(weight)
-		}
+	weight := 100
+	enabled := true
+	if enabledWeight >= 1000 {
+		enabled = false
+		weight = 1
+	} else if remaining := int(1000 - enabledWeight); remaining < weight {
+		weight = remaining
 	}
-	return nil
+	row := model.DailyLotteryPrize{ChatID: chatID, Amount: amount, Weight: weight, Enabled: enabled, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
 func (s *DailyLotteryService) Status(ctx context.Context, chatID, userID int64) (bot.DailyLotteryStatus, error) {
@@ -214,12 +197,6 @@ func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (b
 	}
 	if s == nil || s.store == nil || s.store.DB == nil {
 		return bot.DailyLotteryDrawResult{}, errors.New("抽奖服务尚未接入数据库")
-	}
-	// A user may press a draw button from an older panel without first
-	// refreshing it. Synchronize newly imported inventory amounts before
-	// selecting the prize so those codes are immediately eligible.
-	if err := s.syncInventoryPrizes(ctx, chatID); err != nil {
-		return bot.DailyLotteryDrawResult{}, err
 	}
 	date := time.Now().In(chinaLocation()).Format("2006-01-02")
 	var result bot.DailyLotteryDrawResult
