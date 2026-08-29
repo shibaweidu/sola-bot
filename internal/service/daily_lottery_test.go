@@ -84,10 +84,53 @@ func TestDailyLotteryLastAttemptGuarantee(t *testing.T) {
 	}
 }
 
+func TestDailyLotteryPaidDrawAndReset(t *testing.T) {
+	ctx := context.Background()
+	st := newServiceTestStore(t)
+	createPointTables(t, st.DB)
+	createPointCenterTables(t, st.DB)
+	createDailyLotteryTables(t, st.DB)
+	svc := NewDailyLotteryService(st)
+	if _, err := svc.UpdateConfig(ctx, bot.DailyLotteryConfig{ChatID: 1001, Enabled: true, PaidEnabled: true, CostPoints: 2}); err != nil {
+		t.Fatal(err)
+	}
+	date := time.Now().In(chinaLocation()).Format("2006-01-02")
+	for i := 1; i <= 3; i++ {
+		if err := st.DB.Create(&model.DailyLotteryAttempt{ChatID: 1001, UserID: 2004, DrawDate: date, AttemptNo: i, Result: "lost"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	if err := st.DB.Create(&model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "PAID-10", Amount: 10, Status: "available", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{{Amount: 10, Weight: 1000, Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewPointsService(st).AdjustUserPoints(ctx, 1001, 2004, 5, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Draw(ctx, 1001, 2004)
+	if err != nil || result.Result != "won" || result.CostPoints != 2 || result.Remaining != 0 {
+		t.Fatalf("paid draw = %+v, err=%v", result, err)
+	}
+	point, err := NewPointsService(st).GetUserPoint(ctx, 1001, 2004)
+	if err != nil || point.TotalPoints != 3 {
+		t.Fatalf("paid points = %+v, err=%v", point, err)
+	}
+	if err := svc.ResetAttempts(ctx, 1001, 2004); err != nil {
+		t.Fatal(err)
+	}
+	status, err := svc.Status(ctx, 1001, 2004)
+	if err != nil || status.UsedAttempts != 0 || status.Remaining != 3 {
+		t.Fatalf("reset status = %+v, err=%v", status, err)
+	}
+}
+
 func createDailyLotteryTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	execSQL(t, db,
-		`CREATE TABLE daily_lottery_configs (chat_id integer PRIMARY KEY, enabled boolean NOT NULL DEFAULT false, daily_attempts integer NOT NULL DEFAULT 3, cost_points integer NOT NULL DEFAULT 0, guarantee_on_last boolean NOT NULL DEFAULT true, created_at datetime, updated_at datetime)`,
+		`CREATE TABLE daily_lottery_configs (chat_id integer PRIMARY KEY, enabled boolean NOT NULL DEFAULT false, daily_attempts integer NOT NULL DEFAULT 3, cost_points integer NOT NULL DEFAULT 0, paid_enabled boolean NOT NULL DEFAULT false, guarantee_on_last boolean NOT NULL DEFAULT true, created_at datetime, updated_at datetime)`,
 		`CREATE TABLE daily_lottery_prizes (id integer PRIMARY KEY AUTOINCREMENT, chat_id integer NOT NULL, amount integer NOT NULL, weight integer NOT NULL DEFAULT 1, enabled boolean NOT NULL DEFAULT true, created_at datetime, updated_at datetime)`,
 		`CREATE UNIQUE INDEX idx_daily_lottery_prize_chat_amount ON daily_lottery_prizes(chat_id, amount)`,
 		`CREATE TABLE daily_lottery_attempts (id integer PRIMARY KEY AUTOINCREMENT, chat_id integer NOT NULL, user_id integer NOT NULL, draw_date text NOT NULL, attempt_no integer NOT NULL, result text NOT NULL, amount integer NOT NULL DEFAULT 0, code_id text, cost_points integer NOT NULL DEFAULT 0, created_at datetime)`,

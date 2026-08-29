@@ -887,6 +887,7 @@ type DailyLotteryConfig struct {
 	Enabled         bool  `json:"enabled"`
 	DailyAttempts   int   `json:"daily_attempts"`
 	CostPoints      int   `json:"cost_points"`
+	PaidEnabled     bool  `json:"paid_enabled"`
 	GuaranteeOnLast bool  `json:"guarantee_on_last"`
 }
 
@@ -909,6 +910,7 @@ type DailyLotteryUpdateRequest struct {
 	ChatID          int                      `json:"chat_id" binding:"required"`
 	Enabled         bool                     `json:"enabled"`
 	CostPoints      int                      `json:"cost_points" binding:"gte=0"`
+	PaidEnabled     bool                     `json:"paid_enabled"`
 	GuaranteeOnLast bool                     `json:"guarantee_on_last"`
 	Prizes          []DailyLotteryPrizeInput `json:"prizes" binding:"required,min=1"`
 }
@@ -921,6 +923,12 @@ type DailyLotteryAdminService interface {
 	ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]DailyLotteryCode, error)
 	SummarizeCodes(ctx context.Context, chatID int64) ([]DailyLotteryCodeSummary, error)
 	ImportCodes(ctx context.Context, req DailyLotteryCodeImportRequest) (DailyLotteryCodeImportResult, error)
+	ResetAttempts(ctx context.Context, chatID, userID int64) error
+}
+
+type DailyLotteryResetRequest struct {
+	ChatID int64 `json:"chat_id" binding:"required"`
+	UserID int64 `json:"user_id" binding:"required"`
 }
 
 type DailyLotteryCode struct {

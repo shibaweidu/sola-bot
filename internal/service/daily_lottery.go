@@ -47,13 +47,16 @@ func (s *DailyLotteryService) UpdateConfig(ctx context.Context, cfg bot.DailyLot
 	if cfg.CostPoints < 0 {
 		return bot.DailyLotteryConfig{}, errors.New("抽奖积分不能为负数")
 	}
+	if cfg.PaidEnabled && cfg.CostPoints <= 0 {
+		return bot.DailyLotteryConfig{}, errors.New("开启积分抽奖后，每次消耗积分必须大于 0")
+	}
 	if s == nil || s.store == nil || s.store.DB == nil {
 		cfg.DailyAttempts = dailyLotteryAttempts
 		return cfg, nil
 	}
 	now := time.Now()
-	row := model.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: dailyLotteryAttempts, CostPoints: cfg.CostPoints, GuaranteeOnLast: cfg.GuaranteeOnLast, CreatedAt: now, UpdatedAt: now}
-	if err := s.store.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "chat_id"}}, DoUpdates: clause.AssignmentColumns([]string{"enabled", "daily_attempts", "cost_points", "guarantee_on_last", "updated_at"})}).Create(&row).Error; err != nil {
+	row := model.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: dailyLotteryAttempts, CostPoints: cfg.CostPoints, PaidEnabled: cfg.PaidEnabled, GuaranteeOnLast: cfg.GuaranteeOnLast, CreatedAt: now, UpdatedAt: now}
+	if err := s.store.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "chat_id"}}, DoUpdates: clause.AssignmentColumns([]string{"enabled", "daily_attempts", "cost_points", "paid_enabled", "guarantee_on_last", "updated_at"})}).Create(&row).Error; err != nil {
 		return bot.DailyLotteryConfig{}, err
 	}
 	return dailyLotteryConfigToBot(row), nil
@@ -158,7 +161,8 @@ func (s *DailyLotteryService) Status(ctx context.Context, chatID, userID int64) 
 	if err != nil {
 		return bot.DailyLotteryStatus{}, err
 	}
-	return bot.DailyLotteryStatus{ChatID: chatID, UserID: userID, DrawDate: date, DailyAttempts: dailyLotteryAttempts, UsedAttempts: used, Remaining: maxInt(dailyLotteryAttempts-used, 0), CostPoints: cfg.CostPoints, Enabled: cfg.Enabled, Prizes: prizes}, nil
+	paidAttempts := maxInt(used-dailyLotteryAttempts, 0)
+	return bot.DailyLotteryStatus{ChatID: chatID, UserID: userID, DrawDate: date, DailyAttempts: dailyLotteryAttempts, UsedAttempts: used, Remaining: maxInt(dailyLotteryAttempts-used, 0), CostPoints: cfg.CostPoints, PaidEnabled: cfg.PaidEnabled, PaidCostPoints: cfg.CostPoints, PaidAttempts: paidAttempts, Enabled: cfg.Enabled, Prizes: prizes}, nil
 }
 
 func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (bot.DailyLotteryDrawResult, error) {
@@ -185,10 +189,11 @@ func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (b
 		if err := tx.Where("chat_id = ? AND user_id = ? AND draw_date = ?", chatID, userID, date).Order("attempt_no asc").Find(&attempts).Error; err != nil {
 			return err
 		}
-		if len(attempts) >= dailyLotteryAttempts {
-			return errors.New("今日抽奖次数已用完")
-		}
 		attemptNo := len(attempts) + 1
+		paidDraw := attemptNo > dailyLotteryAttempts
+		if paidDraw && !cfg.PaidEnabled {
+			return errors.New("今日免费次数已用完，积分抽奖未开启")
+		}
 		available, err := dailyLotteryAvailablePrizes(tx, chatID)
 		if err != nil {
 			return err
@@ -201,18 +206,22 @@ func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (b
 		if err != nil {
 			return err
 		}
-		if cfg.CostPoints > 0 {
-			if err := adjustLotteryPointsTx(tx, chatID, userID, -cfg.CostPoints, fmt.Sprintf("daily_lottery:%s:%d", date, attemptNo)); err != nil {
+		costPoints := 0
+		if paidDraw {
+			costPoints = cfg.CostPoints
+		}
+		if costPoints > 0 {
+			if err := adjustLotteryPointsTx(tx, chatID, userID, -costPoints, fmt.Sprintf("daily_lottery:%s:%d", date, attemptNo)); err != nil {
 				return err
 			}
 		}
-		result = bot.DailyLotteryDrawResult{ChatID: chatID, UserID: userID, DrawDate: date, AttemptNo: attemptNo, CostPoints: cfg.CostPoints, Guaranteed: guaranteed}
+		result = bot.DailyLotteryDrawResult{ChatID: chatID, UserID: userID, DrawDate: date, AttemptNo: attemptNo, CostPoints: costPoints, Guaranteed: guaranteed}
 		if !won {
-			if err := tx.Create(&model.DailyLotteryAttempt{ChatID: chatID, UserID: userID, DrawDate: date, AttemptNo: attemptNo, Result: "lost", CostPoints: cfg.CostPoints}).Error; err != nil {
+			if err := tx.Create(&model.DailyLotteryAttempt{ChatID: chatID, UserID: userID, DrawDate: date, AttemptNo: attemptNo, Result: "lost", CostPoints: costPoints}).Error; err != nil {
 				return err
 			}
 			result.Result = "lost"
-			result.Remaining = dailyLotteryAttempts - attemptNo
+			result.Remaining = maxInt(dailyLotteryAttempts-attemptNo, 0)
 			return nil
 		}
 		var code model.DailyLotteryCode
@@ -225,14 +234,14 @@ func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (b
 			return err
 		}
 		codeID := uuid.UUID(code.ID)
-		if err := tx.Create(&model.DailyLotteryAttempt{ChatID: chatID, UserID: userID, DrawDate: date, AttemptNo: attemptNo, Result: "won", Amount: selected.Amount, CodeID: &codeID, CostPoints: cfg.CostPoints}).Error; err != nil {
+		if err := tx.Create(&model.DailyLotteryAttempt{ChatID: chatID, UserID: userID, DrawDate: date, AttemptNo: attemptNo, Result: "won", Amount: selected.Amount, CodeID: &codeID, CostPoints: costPoints}).Error; err != nil {
 			return err
 		}
 		result.Result = "won"
 		result.Amount = selected.Amount
 		result.Code = code.Code
 		result.RedeemURL = code.RedeemURL
-		result.Remaining = dailyLotteryAttempts - attemptNo
+		result.Remaining = maxInt(dailyLotteryAttempts-attemptNo, 0)
 		return nil
 	})
 	return result, err
@@ -337,7 +346,18 @@ func previousAttemptsLost(attempts []model.DailyLotteryAttempt) bool {
 }
 
 func dailyLotteryConfigToBot(row model.DailyLotteryConfig) bot.DailyLotteryConfig {
-	return bot.DailyLotteryConfig{ChatID: row.ChatID, Enabled: row.Enabled, DailyAttempts: dailyLotteryAttempts, CostPoints: row.CostPoints, GuaranteeOnLast: row.GuaranteeOnLast}
+	return bot.DailyLotteryConfig{ChatID: row.ChatID, Enabled: row.Enabled, DailyAttempts: dailyLotteryAttempts, CostPoints: row.CostPoints, PaidEnabled: row.PaidEnabled, GuaranteeOnLast: row.GuaranteeOnLast}
+}
+
+func (s *DailyLotteryService) ResetAttempts(ctx context.Context, chatID, userID int64) error {
+	if chatID == 0 || userID == 0 {
+		return errors.New("chat_id and user_id are required")
+	}
+	if s == nil || s.store == nil || s.store.DB == nil {
+		return nil
+	}
+	date := time.Now().In(chinaLocation()).Format("2006-01-02")
+	return s.store.DB.WithContext(ctx).Where("chat_id = ? AND user_id = ? AND draw_date = ?", chatID, userID, date).Delete(&model.DailyLotteryAttempt{}).Error
 }
 
 func maxInt(a, b int) int {

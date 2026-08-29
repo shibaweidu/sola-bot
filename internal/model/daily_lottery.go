@@ -11,6 +11,7 @@ type DailyLotteryConfig struct {
 	Enabled         bool      `gorm:"not null;default:false" json:"enabled"`
 	DailyAttempts   int       `gorm:"not null;default:3" json:"daily_attempts"`
 	CostPoints      int       `gorm:"not null;default:0" json:"cost_points"`
+	PaidEnabled     bool      `gorm:"not null;default:false" json:"paid_enabled"`
 	GuaranteeOnLast bool      `gorm:"not null;default:true" json:"guarantee_on_last"`
 	CreatedAt       time.Time `gorm:"not null;default:now()" json:"created_at"`
 	UpdatedAt       time.Time `gorm:"not null;default:now()" json:"updated_at"`

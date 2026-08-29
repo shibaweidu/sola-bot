@@ -110,13 +110,13 @@ func (a *App) showDailyLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat api.
 		"🎁 每日额度抽奖",
 		"━━━━━━━━━━",
 		fmt.Sprintf("当前目标：%s", chatTitle(chat)),
-		fmt.Sprintf("今日次数：%d/%d", status.UsedAttempts, status.DailyAttempts),
-		fmt.Sprintf("剩余次数：%d", status.Remaining),
+		fmt.Sprintf("今日免费次数：%d/%d", minInt(status.UsedAttempts, status.DailyAttempts), status.DailyAttempts),
+		fmt.Sprintf("免费剩余次数：%d", status.Remaining),
 	}
-	if status.CostPoints == 0 {
-		lines = append(lines, "抽奖成本：免费")
+	if status.PaidEnabled {
+		lines = append(lines, fmt.Sprintf("积分抽奖：已抽 %d 次，每次 %d 积分", status.PaidAttempts, status.PaidCostPoints))
 	} else {
-		lines = append(lines, fmt.Sprintf("抽奖成本：每次 %d 积分", status.CostPoints))
+		lines = append(lines, "积分抽奖：未开启")
 	}
 	lines = append(lines, "", "当前奖池：")
 	prizeCount := 0
@@ -168,12 +168,17 @@ func (a *App) showDailyLotteryHistory(b *gotgbot.Bot, ctx *ext.Context, chatID i
 }
 
 func formatDailyLotteryResult(result DailyLotteryDrawResult) string {
+	costText := "本次免费抽奖"
+	if result.CostPoints > 0 {
+		costText = fmt.Sprintf("本次已消耗：%d 积分", result.CostPoints)
+	}
 	if result.Result != "won" {
-		return fmt.Sprintf("🎲 本次未中奖\n\n已使用：%d/3 次\n剩余次数：%d", result.AttemptNo, result.Remaining)
+		return fmt.Sprintf("🎲 本次未中奖\n\n%s\n今日免费剩余次数：%d", costText, result.Remaining)
 	}
 	lines := []string{
 		"🎉 恭喜你中奖！",
 		fmt.Sprintf("本次获得：%d 额度", result.Amount),
+		costText,
 	}
 	if result.RedeemURL != "" {
 		lines = append(lines, "兑换地址："+result.RedeemURL)
@@ -181,7 +186,7 @@ func formatDailyLotteryResult(result DailyLotteryDrawResult) string {
 	if result.Guaranteed {
 		lines = append(lines, "", "本次为第 3 次保底中奖。")
 	}
-	lines = append(lines, "", fmt.Sprintf("已使用：%d/3 次 · 剩余：%d 次", result.AttemptNo, result.Remaining))
+	lines = append(lines, "", fmt.Sprintf("今日免费剩余次数：%d", result.Remaining))
 	return strings.Join(lines, "\n")
 }
 
@@ -192,14 +197,25 @@ func formatDailyLotteryCode(result DailyLotteryDrawResult) string {
 func dailyLotteryMarkup(chatID int64, status DailyLotteryStatus) *gotgbot.SendMessageOpts {
 	resource := strconv.FormatInt(chatID, 10)
 	rows := make([][]gotgbot.InlineKeyboardButton, 0, 2)
-	if status.Enabled && status.Remaining > 0 && dailyLotteryHasAvailablePrize(status) {
-		rows = append(rows, []gotgbot.InlineKeyboardButton{{Text: "🎲 抽一次", CallbackData: CallbackData("daily_lottery", "draw", resource)}})
+	if status.Enabled && (status.Remaining > 0 || status.PaidEnabled) && dailyLotteryHasAvailablePrize(status) {
+		label := "🎲 免费抽一次"
+		if status.Remaining == 0 {
+			label = fmt.Sprintf("💎 %d 积分再抽一次", status.PaidCostPoints)
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{{Text: label, CallbackData: CallbackData("daily_lottery", "draw", resource)}})
 	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
 		{Text: "🔄 刷新次数", CallbackData: CallbackData("daily_lottery", "refresh", resource)},
 		{Text: "📋 抽奖记录", CallbackData: CallbackData("daily_lottery", "history", resource)},
 	})
 	return &gotgbot.SendMessageOpts{ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func dailyLotteryHasAvailablePrize(status DailyLotteryStatus) bool {

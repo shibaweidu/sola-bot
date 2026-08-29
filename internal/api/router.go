@@ -128,6 +128,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			compatSecured.GET("/point-center/daily-lottery/codes", server.ListDailyLotteryCodes)
 			compatSecured.GET("/point-center/daily-lottery/codes/summary", server.SummarizeDailyLotteryCodes)
 			compatSecured.POST("/point-center/daily-lottery/codes/import", server.ImportDailyLotteryCodes)
+			compatSecured.POST("/point-center/daily-lottery/reset", server.ResetDailyLotteryAttempts)
 			compatSecured.GET("/stats/overview", server.StatsOverview)
 			compatSecured.GET("/stats/activity", server.StatsActivity)
 			compatSecured.GET("/stats/points", server.StatsPoints)
@@ -299,6 +300,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 				pointCenter.GET("/daily-lottery/codes", server.ListDailyLotteryCodes)
 				pointCenter.GET("/daily-lottery/codes/summary", server.SummarizeDailyLotteryCodes)
 				pointCenter.POST("/daily-lottery/codes/import", server.ImportDailyLotteryCodes)
+				pointCenter.POST("/daily-lottery/reset", server.ResetDailyLotteryAttempts)
 			}
 
 			auditLogs := secured.Group("/audit-logs")

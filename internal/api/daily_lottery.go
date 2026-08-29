@@ -167,3 +167,23 @@ func (s *Server) ImportDailyLotteryCodes(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (s *Server) ResetDailyLotteryAttempts(c *gin.Context) {
+	if s.deps.DailyLottery == nil {
+		writeError(c, http.StatusInternalServerError, "daily lottery service is not configured")
+		return
+	}
+	var req DailyLotteryResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.ensureChatAllowed(c, req.ChatID) {
+		return
+	}
+	if err := s.deps.DailyLottery.ResetAttempts(c.Request.Context(), req.ChatID, req.UserID); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}

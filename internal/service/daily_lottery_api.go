@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dabowin/sola/internal/api"
 	"github.com/dabowin/sola/internal/bot"
@@ -14,7 +15,7 @@ func (s *dailyLotteryAPIService) GetConfig(ctx context.Context, chatID int64) (a
 	if err != nil {
 		return api.DailyLotteryConfig{}, err
 	}
-	return api.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: cfg.DailyAttempts, CostPoints: cfg.CostPoints, GuaranteeOnLast: cfg.GuaranteeOnLast}, nil
+	return api.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: cfg.DailyAttempts, CostPoints: cfg.CostPoints, PaidEnabled: cfg.PaidEnabled, GuaranteeOnLast: cfg.GuaranteeOnLast}, nil
 }
 
 func (s *dailyLotteryAPIService) ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]api.DailyLotteryCode, error) {
@@ -47,14 +48,21 @@ func (s *dailyLotteryAPIService) ImportCodes(ctx context.Context, req api.DailyL
 }
 
 func (s *dailyLotteryAPIService) UpdateConfig(ctx context.Context, req api.DailyLotteryUpdateRequest) (api.DailyLotteryConfig, error) {
+	if req.PaidEnabled && req.CostPoints <= 0 {
+		return api.DailyLotteryConfig{}, fmt.Errorf("开启积分抽奖后，每次消耗积分必须大于 0")
+	}
 	if _, err := s.ReplacePrizes(ctx, int64(req.ChatID), req.Prizes); err != nil {
 		return api.DailyLotteryConfig{}, err
 	}
-	cfg, err := s.service.UpdateConfig(ctx, bot.DailyLotteryConfig{ChatID: int64(req.ChatID), Enabled: req.Enabled, CostPoints: req.CostPoints, GuaranteeOnLast: req.GuaranteeOnLast})
+	cfg, err := s.service.UpdateConfig(ctx, bot.DailyLotteryConfig{ChatID: int64(req.ChatID), Enabled: req.Enabled, CostPoints: req.CostPoints, PaidEnabled: req.PaidEnabled, GuaranteeOnLast: req.GuaranteeOnLast})
 	if err != nil {
 		return api.DailyLotteryConfig{}, err
 	}
-	return api.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: cfg.DailyAttempts, CostPoints: cfg.CostPoints, GuaranteeOnLast: cfg.GuaranteeOnLast}, nil
+	return api.DailyLotteryConfig{ChatID: cfg.ChatID, Enabled: cfg.Enabled, DailyAttempts: cfg.DailyAttempts, CostPoints: cfg.CostPoints, PaidEnabled: cfg.PaidEnabled, GuaranteeOnLast: cfg.GuaranteeOnLast}, nil
+}
+
+func (s *dailyLotteryAPIService) ResetAttempts(ctx context.Context, chatID, userID int64) error {
+	return s.service.ResetAttempts(ctx, chatID, userID)
 }
 
 func (s *dailyLotteryAPIService) ListPrizes(ctx context.Context, chatID int64) ([]api.DailyLotteryPrize, error) {

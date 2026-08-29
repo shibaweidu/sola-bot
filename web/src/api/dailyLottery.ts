@@ -6,6 +6,7 @@ export interface DailyLotteryConfig {
   enabled: boolean;
   daily_attempts: number;
   cost_points: number;
+  paid_enabled: boolean;
   guarantee_on_last: boolean;
 }
 
@@ -51,6 +52,7 @@ export function updateDailyLottery(payload: {
   chat_id: ChatID;
   enabled: boolean;
   cost_points: number;
+  paid_enabled: boolean;
   guarantee_on_last: boolean;
   prizes: Array<{ amount: number; weight: number; enabled: boolean }>;
 }): Promise<DailyLotteryConfig> {
@@ -77,4 +79,8 @@ export function importDailyLotteryCodes(payload: {
   codes: string[];
 }): Promise<{ imported: number; skipped: number }> {
   return request<{ imported: number; skipped: number }>("/point-center/daily-lottery/codes/import", { method: "POST", body: payload });
+}
+
+export function resetDailyLotteryAttempts(payload: { chat_id: ChatID; user_id: number }): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/point-center/daily-lottery/reset", { method: "POST", body: payload });
 }

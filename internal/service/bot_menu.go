@@ -81,14 +81,26 @@ func (s *BotMenuService) List(ctx context.Context, role string) ([]model.BotMenu
 	if err != nil {
 		return nil, err
 	}
+	items, err = s.ensureHideKeyboardItem(ctx, items, role)
+	if err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
 // ensureDailyLotteryItem keeps menus created before the daily lottery action
 // was introduced compatible without overwriting existing customizations.
 func (s *BotMenuService) ensureDailyLotteryItem(ctx context.Context, items []model.BotMenuItem, role string) ([]model.BotMenuItem, error) {
+	return s.ensureBuiltinItem(ctx, items, role, "daily_lottery", "🎲 每日额度抽奖", "🎲")
+}
+
+func (s *BotMenuService) ensureHideKeyboardItem(ctx context.Context, items []model.BotMenuItem, role string) ([]model.BotMenuItem, error) {
+	return s.ensureBuiltinItem(ctx, items, role, "hide_keyboard", "⌨️ 收起菜单", "⌨️")
+}
+
+func (s *BotMenuService) ensureBuiltinItem(ctx context.Context, items []model.BotMenuItem, role, actionKey, defaultLabel, icon string) ([]model.BotMenuItem, error) {
 	for _, item := range items {
-		if item.ActionType == model.BotMenuActionBuiltin && item.ActionKey == "daily_lottery" {
+		if item.ActionType == model.BotMenuActionBuiltin && item.ActionKey == actionKey {
 			return items, nil
 		}
 	}
@@ -107,10 +119,10 @@ func (s *BotMenuService) ensureDailyLotteryItem(ctx context.Context, items []mod
 		row++
 		column = 0
 	}
-	label := "🎲 每日额度抽奖"
+	label := defaultLabel
 	for _, existing := range items {
 		if existing.RenderLabel() == label {
-			label = "🎲 每日额度抽奖入口"
+			label = defaultLabel + "入口"
 			break
 		}
 	}
@@ -118,9 +130,9 @@ func (s *BotMenuService) ensureDailyLotteryItem(ctx context.Context, items []mod
 		TelegramBotID: s.telegramBotID,
 		Role:          role,
 		Label:         label,
-		Icon:          "🎲",
+		Icon:          icon,
 		ActionType:    model.BotMenuActionBuiltin,
-		ActionKey:     "daily_lottery",
+		ActionKey:     actionKey,
 		RowIndex:      row,
 		ColumnIndex:   column,
 		Enabled:       true,
@@ -286,15 +298,16 @@ func defaultBotMenu(role string) []model.BotMenuItem {
 		{Role: role, Label: "🏪 小铺地址", Icon: "🏪", ActionType: model.BotMenuActionBuiltin, ActionKey: "shop", RowIndex: 2, ColumnIndex: 1, Enabled: true},
 		{Role: role, Label: "🏆 积分榜", Icon: "🏆", ActionType: model.BotMenuActionBuiltin, ActionKey: "rank", RowIndex: 3, ColumnIndex: 0, Enabled: true},
 		{Role: role, Label: "🎲 每日额度抽奖", Icon: "🎲", ActionType: model.BotMenuActionBuiltin, ActionKey: "daily_lottery", RowIndex: 3, ColumnIndex: 1, Enabled: true},
+		{Role: role, Label: "⌨️ 收起菜单", Icon: "⌨️", ActionType: model.BotMenuActionBuiltin, ActionKey: "hide_keyboard", RowIndex: 4, ColumnIndex: 0, Enabled: true},
 	}
 	if role != model.BotMenuRoleAdmin {
 		return items
 	}
 	items = append(items,
-		model.BotMenuItem{Role: role, Label: "📋 运营工作台", Icon: "📋", ActionType: model.BotMenuActionBuiltin, ActionKey: "private_console", RowIndex: 4, ColumnIndex: 0, Enabled: true},
-		model.BotMenuItem{Role: role, Label: "🛡 群管中心", Icon: "🛡", ActionType: model.BotMenuActionBuiltin, ActionKey: "admin_center", RowIndex: 4, ColumnIndex: 1, Enabled: true},
-		model.BotMenuItem{Role: role, Label: "⚙️ 群组配置", Icon: "⚙️", ActionType: model.BotMenuActionBuiltin, ActionKey: "admin_config", RowIndex: 5, ColumnIndex: 0, Enabled: true},
-		model.BotMenuItem{Role: role, Label: "📣 定时发帖", Icon: "📣", ActionType: model.BotMenuActionBuiltin, ActionKey: "scheduled_posts", RowIndex: 5, ColumnIndex: 1, Enabled: true},
+		model.BotMenuItem{Role: role, Label: "📋 运营工作台", Icon: "📋", ActionType: model.BotMenuActionBuiltin, ActionKey: "private_console", RowIndex: 4, ColumnIndex: 1, Enabled: true},
+		model.BotMenuItem{Role: role, Label: "🛡 群管中心", Icon: "🛡", ActionType: model.BotMenuActionBuiltin, ActionKey: "admin_center", RowIndex: 5, ColumnIndex: 0, Enabled: true},
+		model.BotMenuItem{Role: role, Label: "⚙️ 群组配置", Icon: "⚙️", ActionType: model.BotMenuActionBuiltin, ActionKey: "admin_config", RowIndex: 5, ColumnIndex: 1, Enabled: true},
+		model.BotMenuItem{Role: role, Label: "📣 定时发帖", Icon: "📣", ActionType: model.BotMenuActionBuiltin, ActionKey: "scheduled_posts", RowIndex: 6, ColumnIndex: 0, Enabled: true},
 	)
 	return items
 }

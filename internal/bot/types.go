@@ -309,6 +309,7 @@ type DailyLotteryConfig struct {
 	Enabled         bool
 	DailyAttempts   int
 	CostPoints      int
+	PaidEnabled     bool
 	GuaranteeOnLast bool
 }
 
@@ -322,15 +323,18 @@ type DailyLotteryPrize struct {
 }
 
 type DailyLotteryStatus struct {
-	ChatID        int64
-	UserID        int64
-	DrawDate      string
-	DailyAttempts int
-	UsedAttempts  int
-	Remaining     int
-	CostPoints    int
-	Enabled       bool
-	Prizes        []DailyLotteryPrize
+	ChatID         int64
+	UserID         int64
+	DrawDate       string
+	DailyAttempts  int
+	UsedAttempts   int
+	Remaining      int
+	CostPoints     int
+	PaidEnabled    bool
+	PaidCostPoints int
+	PaidAttempts   int
+	Enabled        bool
+	Prizes         []DailyLotteryPrize
 }
 
 type DailyLotteryDrawResult struct {
@@ -362,6 +366,7 @@ type DailyLotteryService interface {
 	ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]DailyLotteryCode, error)
 	SummarizeCodes(ctx context.Context, chatID int64) ([]DailyLotteryCodeSummary, error)
 	ImportCodes(ctx context.Context, req DailyLotteryCodeImportRequest) (DailyLotteryCodeImportResult, error)
+	ResetAttempts(ctx context.Context, chatID, userID int64) error
 }
 
 type DailyLotteryCode struct {

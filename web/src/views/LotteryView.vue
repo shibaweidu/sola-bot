@@ -10,7 +10,7 @@
       </template>
     </PageHeader>
 
-    <PanelSection title="每日额度抽奖" description="每个用户在当前群组每天可抽 3 次，奖品从独立抽奖库存中发放。">
+    <PanelSection title="每日额度抽奖" description="每个用户每天免费抽 3 次；免费次数用完后，可按配置继续消耗积分抽奖。奖品从独立抽奖库存中发放。">
       <template #actions>
         <ChatSelect v-model="selectedChatId" />
         <el-button :icon="Refresh" :loading="dailyLoading" @click="loadDailyLottery">刷新配置</el-button>
@@ -21,10 +21,11 @@
         <div class="daily-switches">
           <div class="daily-switch-row"><span>开启每日额度抽奖</span><el-switch v-model="dailyForm.enabled" /></div>
           <div class="daily-switch-row"><span>第 3 次未中奖时强制发码</span><el-switch v-model="dailyForm.guarantee_on_last" /></div>
+          <div class="daily-switch-row"><span>开启积分抽奖</span><el-switch v-model="dailyForm.paid_enabled" /></div>
           <div class="daily-fixed-row"><span>每日次数</span><strong>3 次（固定）</strong></div>
         </div>
-        <el-form-item label="每次抽奖消耗积分（0 = 免费）" class="daily-cost">
-          <el-input-number v-model="dailyForm.cost_points" :min="0" :max="999999" />
+        <el-form-item label="积分抽奖每次消耗" class="daily-cost">
+          <el-input-number v-model="dailyForm.cost_points" :min="1" :max="999999" :disabled="!dailyForm.paid_enabled" />
         </el-form-item>
       </el-form>
       <div class="daily-prize-header">
@@ -74,6 +75,16 @@
         <el-table-column prop="status" label="状态" width="100" />
         <el-table-column prop="redeem_url" label="兑换地址" min-width="180" show-overflow-tooltip />
       </el-table>
+
+      <div class="daily-prize-header reset-header">
+        <div><strong>测试工具</strong><span>仅重置指定用户当天的抽奖次数；不会回收已经发出的兑换码，也不会返还已扣积分。</span></div>
+      </div>
+      <el-form label-position="top" class="daily-reset-form" @submit.prevent>
+        <el-form-item label="Telegram 用户 ID">
+          <el-input-number v-model="dailyReset.userId" :min="1" :max="999999999999999" :precision="0" class="wide-control" placeholder="例如：123456789" />
+        </el-form-item>
+        <el-button type="warning" :loading="dailyResetting" @click="resetDailyAttempts">重置今日抽奖次数</el-button>
+      </el-form>
     </PanelSection>
 
     <div class="summary-grid">
@@ -257,7 +268,7 @@ import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
 import { cancelLottery, createLottery, fetchLotteries, fetchLotteryEntries, fetchLotteryWinners } from "@/api/lottery";
-import { fetchDailyLotteryCodeSummary, fetchDailyLotteryCodes, fetchDailyLotteryConfig, fetchDailyLotteryPrizes, importDailyLotteryCodes, updateDailyLottery, type DailyLotteryCode, type DailyLotteryCodeSummary, type DailyLotteryPrize } from "@/api/dailyLottery";
+import { fetchDailyLotteryCodeSummary, fetchDailyLotteryCodes, fetchDailyLotteryConfig, fetchDailyLotteryPrizes, importDailyLotteryCodes, resetDailyLotteryAttempts, updateDailyLottery, type DailyLotteryCode, type DailyLotteryCodeSummary, type DailyLotteryPrize } from "@/api/dailyLottery";
 import type { ChatID, LotteryEntryRecord, LotteryPayload, LotteryRecord } from "@/types/api";
 import { parseChinaLocalDateTimeToISO } from "@/utils/datetime";
 import { parseNumericId, formatDateTime, errorMessage } from "@/utils/helpers";
@@ -281,8 +292,10 @@ const dailyCodes = ref<DailyLotteryCode[]>([]);
 const dailyCodeSummaries = ref<DailyLotteryCodeSummary[]>([]);
 const inventoryLoading = ref(false);
 const inventoryImporting = ref(false);
+const dailyResetting = ref(false);
 const dailyInventory = reactive({ amount: undefined as number | undefined, amountInput: 10, batchName: "", redeemURL: "", codes: "" });
-const dailyForm = reactive({ enabled: false, daily_attempts: 3, cost_points: 0, guarantee_on_last: true });
+const dailyReset = reactive({ userId: undefined as number | undefined });
+const dailyForm = reactive({ enabled: false, daily_attempts: 3, cost_points: 1, paid_enabled: false, guarantee_on_last: true });
 const form = reactive<LotteryPayload>({
   chat_id: "",
   title: "",
@@ -502,7 +515,7 @@ async function loadDailyLottery(): Promise<void> {
     dailyPrizes.value = [];
     dailyCodes.value = [];
     dailyCodeSummaries.value = [];
-    Object.assign(dailyForm, { enabled: false, daily_attempts: 3, cost_points: 0, guarantee_on_last: true });
+    Object.assign(dailyForm, { enabled: false, daily_attempts: 3, cost_points: 1, paid_enabled: false, guarantee_on_last: true });
     return;
   }
   dailyLoading.value = true;
@@ -574,12 +587,17 @@ async function saveDailyLottery(): Promise<void> {
     ElMessage.warning("请配置至少一个奖池，启用权重合计不能超过 1000");
     return;
   }
+  if (dailyForm.paid_enabled && (!Number.isSafeInteger(Number(dailyForm.cost_points)) || Number(dailyForm.cost_points) <= 0)) {
+    ElMessage.warning("开启积分抽奖后，请设置大于 0 的积分消耗");
+    return;
+  }
   dailySaving.value = true;
   try {
     await updateDailyLottery({
       chat_id: chatID,
       enabled: dailyForm.enabled,
       cost_points: dailyForm.cost_points,
+      paid_enabled: dailyForm.paid_enabled,
       guarantee_on_last: dailyForm.guarantee_on_last,
       prizes: dailyPrizes.value.map(({ amount, weight, enabled }) => ({ amount, weight, enabled })),
     });
@@ -589,6 +607,31 @@ async function saveDailyLottery(): Promise<void> {
     ElMessage.error(errorMessage(error));
   } finally {
     dailySaving.value = false;
+  }
+}
+
+async function resetDailyAttempts(): Promise<void> {
+  const chatID = parseNumericId(selectedChatId.value);
+  const userID = parseNumericId(dailyReset.userId);
+  if (chatID === undefined || !Number.isSafeInteger(chatID)) { ElMessage.warning("请先选择群组"); return; }
+  if (userID === undefined || !Number.isSafeInteger(userID) || userID <= 0) { ElMessage.warning("请输入有效的 Telegram 用户 ID"); return; }
+  try {
+    await ElMessageBox.confirm("将清空该用户今天的每日抽奖记录，已发出的兑换码和已扣积分不会撤销。确认继续？", "重置今日抽奖次数", {
+      type: "warning",
+      confirmButtonText: "确认重置",
+      cancelButtonText: "取消",
+    });
+  } catch {
+    return;
+  }
+  dailyResetting.value = true;
+  try {
+    await resetDailyLotteryAttempts({ chat_id: chatID, user_id: userID });
+    ElMessage.success("该用户今日抽奖次数已重置");
+  } catch (error) {
+    ElMessage.error(errorMessage(error));
+  } finally {
+    dailyResetting.value = false;
   }
 }
 
@@ -675,6 +718,19 @@ onMounted(() => { void loadLotteries(); void loadDailyLottery(); });
 .inventory-header {
   margin-top: 24px;
 }
+.reset-header {
+  margin-top: 24px;
+}
+.daily-reset-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  max-width: 360px;
+}
+.daily-reset-form .el-form-item {
+  flex: 1;
+  margin-bottom: 0;
+}
 .daily-inventory-form {
   margin-top: 12px;
 }
@@ -703,5 +759,6 @@ onMounted(() => { void loadLotteries(); void loadDailyLottery(); });
   .daily-form { align-items: stretch; flex-direction: column; }
   .daily-switches { grid-template-columns: 1fr; }
   .daily-cost { min-width: 0; }
+  .daily-reset-form { align-items: stretch; flex-direction: column; }
 }
 </style>
