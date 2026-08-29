@@ -7,6 +7,17 @@ import (
 	"github.com/dabowin/sola/internal/api"
 )
 
+func TestDailyLotteryHasAvailablePrize(t *testing.T) {
+	status := DailyLotteryStatus{Enabled: true, Remaining: 3, Prizes: []DailyLotteryPrize{{Amount: 10, Weight: 100, Enabled: true, AvailableCode: 0}}}
+	if dailyLotteryHasAvailablePrize(status) {
+		t.Fatal("empty inventory should not enable draw")
+	}
+	status.Prizes[0].AvailableCode = 1
+	if !dailyLotteryHasAvailablePrize(status) {
+		t.Fatal("available inventory should enable draw")
+	}
+}
+
 func TestLotteryJoinButtonVisibilityByJoinType(t *testing.T) {
 	cases := []struct {
 		name     string

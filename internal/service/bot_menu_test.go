@@ -13,19 +13,22 @@ func TestBotMenuDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(member) != 7 || member[0].ActionKey != "invite_rewards" || member[6].ActionKey != "rank" {
+	if len(member) != 8 || member[0].ActionKey != "invite_rewards" || member[6].ActionKey != "rank" || member[7].ActionKey != "daily_lottery" {
 		t.Fatalf("unexpected member defaults: %#v", member)
 	}
 	admin, err := service.List(context.Background(), model.BotMenuRoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(admin) != 11 || admin[7].ActionKey != "private_console" {
+	if len(admin) != 12 || admin[7].ActionKey != "daily_lottery" || admin[8].ActionKey != "private_console" {
 		t.Fatalf("unexpected admin defaults: %#v", admin)
 	}
 }
 
 func TestValidateBotMenuItems(t *testing.T) {
+	if _, ok := builtinBotMenuActions["daily_lottery"]; !ok {
+		t.Fatal("daily_lottery should be a supported built-in action")
+	}
 	base := model.BotMenuItem{Role: model.BotMenuRoleMember, Label: "帮助", ActionType: model.BotMenuActionBuiltin, ActionKey: "help", Enabled: true}
 	if err := validateBotMenuItems(model.BotMenuRoleMember, []model.BotMenuItem{base, base}); err == nil {
 		t.Fatal("expected duplicate label/position error")

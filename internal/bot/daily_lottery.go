@@ -120,15 +120,23 @@ func (a *App) showDailyLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat api.
 	}
 	lines = append(lines, "", "当前奖池：")
 	prizeCount := 0
+	availableCount := 0
 	for _, prize := range status.Prizes {
 		if !prize.Enabled {
 			continue
 		}
 		prizeCount++
+		if prize.AvailableCode > 0 {
+			availableCount += prize.AvailableCode
+		}
 		lines = append(lines, fmt.Sprintf("%d 额度 · 权重 %d/1000 · 可用 %d", prize.Amount, prize.Weight, prize.AvailableCode))
 	}
-	if prizeCount == 0 {
-		lines = append(lines, "暂无已配置的奖池，请联系管理员。")
+	if !status.Enabled {
+		lines = append(lines, "", "每日额度抽奖尚未开启，请联系管理员。")
+	} else if prizeCount == 0 {
+		lines = append(lines, "", "暂无奖池配置，请联系管理员。")
+	} else if availableCount == 0 {
+		lines = append(lines, "", "当前暂无可用兑换码，请稍后再试。")
 	} else {
 		lines = append(lines, "", "中奖兑换码将通过私聊发送。")
 	}
@@ -184,7 +192,7 @@ func formatDailyLotteryCode(result DailyLotteryDrawResult) string {
 func dailyLotteryMarkup(chatID int64, status DailyLotteryStatus) *gotgbot.SendMessageOpts {
 	resource := strconv.FormatInt(chatID, 10)
 	rows := make([][]gotgbot.InlineKeyboardButton, 0, 2)
-	if status.Enabled && status.Remaining > 0 {
+	if status.Enabled && status.Remaining > 0 && dailyLotteryHasAvailablePrize(status) {
 		rows = append(rows, []gotgbot.InlineKeyboardButton{{Text: "🎲 抽一次", CallbackData: CallbackData("daily_lottery", "draw", resource)}})
 	}
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
@@ -192,4 +200,13 @@ func dailyLotteryMarkup(chatID int64, status DailyLotteryStatus) *gotgbot.SendMe
 		{Text: "📋 抽奖记录", CallbackData: CallbackData("daily_lottery", "history", resource)},
 	})
 	return &gotgbot.SendMessageOpts{ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}}
+}
+
+func dailyLotteryHasAvailablePrize(status DailyLotteryStatus) bool {
+	for _, prize := range status.Prizes {
+		if prize.Enabled && prize.AvailableCode > 0 {
+			return true
+		}
+	}
+	return false
 }

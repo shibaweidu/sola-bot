@@ -166,6 +166,7 @@ const builtinActions = [
 	{ value: "purchase", label: "直接购买额度" },
 	{ value: "shop", label: "小铺地址" },
   { value: "lottery", label: "抽奖大厅" },
+  { value: "daily_lottery", label: "每日额度抽奖" },
   { value: "help", label: "使用帮助" },
   { value: "info", label: "会话信息" },
   { value: "private_console", label: "运营工作台" },

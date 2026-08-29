@@ -180,13 +180,13 @@ func (a *App) handlePrivateMenuAction(b *gotgbot.Bot, ctx *ext.Context, role, ac
 		return err
 	}
 	needsTarget := map[string]bool{
-		"points": true, "sign": true, "rank": true, "lottery": true,
+		"points": true, "sign": true, "rank": true, "lottery": true, "daily_lottery": true,
 		"private_console": true, "admin_center": true, "admin_config": true, "scheduled_posts": true,
 		"invite_rewards": true, "exchange": true, "purchase": true, "shop": true,
 	}
 	if needsTarget[action] && !ok {
 		publicAction := map[string]bool{
-			"points": true, "sign": true, "rank": true, "lottery": true,
+			"points": true, "sign": true, "rank": true, "lottery": true, "daily_lottery": true,
 			"invite_rewards": true, "exchange": true, "purchase": true, "shop": true,
 		}
 		if publicAction[action] {
@@ -216,6 +216,8 @@ func (a *App) handlePrivateMenuAction(b *gotgbot.Bot, ctx *ext.Context, role, ac
 		return a.showPointCenterShop(b, ctx, ChatRef{ID: chat.ChatID, Type: chat.ChatType, Title: chat.Title, Username: chat.Username})
 	case "lottery":
 		return a.showPrivateLotteryCenter(b, ctx, chat)
+	case "daily_lottery":
+		return a.showDailyLotteryCenter(b, ctx, chat)
 	case "help":
 		return a.handleHelp(b, ctx)
 	case "info":

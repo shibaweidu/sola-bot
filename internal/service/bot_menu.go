@@ -28,6 +28,7 @@ var builtinBotMenuActions = map[string]struct{}{
 	"exchange":        {},
 	"purchase":        {},
 	"shop":            {},
+	"daily_lottery":   {},
 }
 
 type BotMenuService struct {
@@ -76,6 +77,58 @@ func (s *BotMenuService) List(ctx context.Context, role string) ([]model.BotMenu
 		}
 		return s.List(ctx, role)
 	}
+	items, err = s.ensureDailyLotteryItem(ctx, items, role)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// ensureDailyLotteryItem keeps menus created before the daily lottery action
+// was introduced compatible without overwriting existing customizations.
+func (s *BotMenuService) ensureDailyLotteryItem(ctx context.Context, items []model.BotMenuItem, role string) ([]model.BotMenuItem, error) {
+	for _, item := range items {
+		if item.ActionType == model.BotMenuActionBuiltin && item.ActionKey == "daily_lottery" {
+			return items, nil
+		}
+	}
+	if len(items) >= 20 {
+		return items, nil
+	}
+	maxRow := -1
+	maxColumn := -1
+	for _, item := range items {
+		if item.RowIndex > maxRow || (item.RowIndex == maxRow && item.ColumnIndex > maxColumn) {
+			maxRow, maxColumn = item.RowIndex, item.ColumnIndex
+		}
+	}
+	row, column := maxRow, maxColumn+1
+	if row < 0 || column >= 4 {
+		row++
+		column = 0
+	}
+	label := "🎲 每日额度抽奖"
+	for _, existing := range items {
+		if existing.RenderLabel() == label {
+			label = "🎲 每日额度抽奖入口"
+			break
+		}
+	}
+	item := model.BotMenuItem{
+		TelegramBotID: s.telegramBotID,
+		Role:          role,
+		Label:         label,
+		Icon:          "🎲",
+		ActionType:    model.BotMenuActionBuiltin,
+		ActionKey:     "daily_lottery",
+		RowIndex:      row,
+		ColumnIndex:   column,
+		Enabled:       true,
+	}
+	if err := s.store.DB.WithContext(ctx).Create(&item).Error; err != nil {
+		return nil, err
+	}
+	items = append(items, item)
 	return items, nil
 }
 
@@ -232,6 +285,7 @@ func defaultBotMenu(role string) []model.BotMenuItem {
 		{Role: role, Label: "🛒 直接购买额度", Icon: "🛒", ActionType: model.BotMenuActionBuiltin, ActionKey: "purchase", RowIndex: 2, ColumnIndex: 0, Enabled: true},
 		{Role: role, Label: "🏪 小铺地址", Icon: "🏪", ActionType: model.BotMenuActionBuiltin, ActionKey: "shop", RowIndex: 2, ColumnIndex: 1, Enabled: true},
 		{Role: role, Label: "🏆 积分榜", Icon: "🏆", ActionType: model.BotMenuActionBuiltin, ActionKey: "rank", RowIndex: 3, ColumnIndex: 0, Enabled: true},
+		{Role: role, Label: "🎲 每日额度抽奖", Icon: "🎲", ActionType: model.BotMenuActionBuiltin, ActionKey: "daily_lottery", RowIndex: 3, ColumnIndex: 1, Enabled: true},
 	}
 	if role != model.BotMenuRoleAdmin {
 		return items
