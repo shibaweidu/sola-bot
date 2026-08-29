@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/dabowin/sola/internal/api"
 )
 
@@ -15,6 +16,34 @@ func TestDailyLotteryHasAvailablePrize(t *testing.T) {
 	status.Prizes[0].AvailableCode = 1
 	if !dailyLotteryHasAvailablePrize(status) {
 		t.Fatal("available inventory should enable draw")
+	}
+}
+
+func TestDailyLotteryMarkupKeepsDrawButtonAfterWin(t *testing.T) {
+	status := DailyLotteryStatus{Enabled: true, Remaining: 1, PaidEnabled: true, PaidCostPoints: 2, Prizes: []DailyLotteryPrize{{Amount: 1, Weight: 100, Enabled: true, AvailableCode: 3}}}
+	markup := dailyLotteryMarkup(1001, status)
+	if markup == nil || markup.ReplyMarkup == nil {
+		t.Fatal("expected lottery markup")
+	}
+	keyboard := markup.ReplyMarkup.(gotgbot.InlineKeyboardMarkup).InlineKeyboard
+	if len(keyboard) == 0 || keyboard[0][0].Text != "🎲 免费抽一次" {
+		t.Fatalf("expected free draw button, got %+v", keyboard)
+	}
+	status.Remaining = 0
+	markup = dailyLotteryMarkup(1001, status)
+	keyboard = markup.ReplyMarkup.(gotgbot.InlineKeyboardMarkup).InlineKeyboard
+	if len(keyboard) == 0 || keyboard[0][0].Text != "💎 2 积分再抽一次" {
+		t.Fatalf("expected paid draw button, got %+v", keyboard)
+	}
+}
+
+func TestDailyLotteryUserResultHidesPrizeDetails(t *testing.T) {
+	text := formatDailyLotteryResult(DailyLotteryDrawResult{Result: "won", Amount: 100, Code: "SECRET", RedeemURL: "https://example.com/redeem", Remaining: 2})
+	if !strings.Contains(text, "兑换码已发放") || !strings.Contains(text, "兑换地址：https://example.com/redeem") {
+		t.Fatalf("result text missing user-facing guidance: %s", text)
+	}
+	if strings.Contains(text, "100") || strings.Contains(text, "额度") || strings.Contains(text, "SECRET") {
+		t.Fatalf("result text exposes prize details or code: %s", text)
 	}
 }
 

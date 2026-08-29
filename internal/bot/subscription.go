@@ -46,6 +46,16 @@ func (a *App) handleForceSubscribeChatMember(b *gotgbot.Bot, ctx *ext.Context) e
 		return ext.ContinueGroups
 	}
 	member := update.NewChatMember.GetUser()
+	// Telegram can emit a chat_member update while an invite/join request is
+	// still pending.  Do not mute or notify until the API confirms that the
+	// user is an actual member of the target group.
+	confirmed, confirmErr := currentGroupMember(ctx, b, update.Chat.Id, member.Id)
+	if confirmErr != nil || !confirmed {
+		if confirmErr != nil {
+			log.Printf("skip force subscription for unconfirmed member: chat=%d user=%d error=%v", update.Chat.Id, member.Id, confirmErr)
+		}
+		return ext.ContinueGroups
+	}
 	if member.IsBot || a.forceSubscribeExempt(b, ctx, member.Id, ChatAdminConfig{ChatID: update.Chat.Id}) {
 		return ext.ContinueGroups
 	}
@@ -126,6 +136,13 @@ func (a *App) handleForceSubscribeNewMembers(b *gotgbot.Bot, ctx *ext.Context) e
 		if member.IsBot || a.forceSubscribeExempt(b, ctx, member.Id, cfg) {
 			continue
 		}
+		confirmed, confirmErr := currentGroupMember(ctx, b, scope.Chat.ID, member.Id)
+		if confirmErr != nil || !confirmed {
+			if confirmErr != nil {
+				log.Printf("skip force subscription for unconfirmed new member: chat=%d user=%d error=%v", scope.Chat.ID, member.Id, confirmErr)
+			}
+			continue
+		}
 		subscribed, missing, checkErr := a.checkForceSubscription(scope.Context, b, cfg, member.Id, false)
 		if checkErr != nil {
 			log.Printf("force subscription check failed: chat=%d user=%d error=%v", scope.Chat.ID, member.Id, checkErr)
@@ -150,6 +167,20 @@ func (a *App) handleForceSubscribeNewMembers(b *gotgbot.Bot, ctx *ext.Context) e
 		return ext.EndGroups
 	}
 	return ext.ContinueGroups
+}
+
+// currentGroupMember performs a fresh membership lookup instead of trusting a
+// pending invite/join-request update.  This prevents subscription prompts from
+// appearing before the user has actually joined the group.
+func currentGroupMember(ctx *ext.Context, b *gotgbot.Bot, chatID, userID int64) (bool, error) {
+	if ctx == nil || b == nil || chatID == 0 || userID == 0 {
+		return false, fmt.Errorf("invalid membership lookup")
+	}
+	member, err := b.GetChatMemberWithContext(requestScope(ctx).Context, chatID, userID, nil)
+	if err != nil {
+		return false, err
+	}
+	return chatMemberPresent(member), nil
 }
 
 func (a *App) handleForceSubscribeMessage(b *gotgbot.Bot, ctx *ext.Context) error {

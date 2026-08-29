@@ -49,8 +49,8 @@
       <div class="daily-total">启用奖池权重合计：{{ dailyWeightTotal }}/1000 · {{ dailyPrizePercent(dailyWeightTotal) }}</div>
 
       <div class="daily-prize-header inventory-header">
-        <div><strong>抽奖库存</strong><span>与普通积分兑换库存隔离；每行填写一个兑换码。</span></div>
-        <el-button :icon="Refresh" :loading="inventoryLoading" @click="loadDailyInventory">刷新库存</el-button>
+        <div><strong>抽奖库存</strong><span>与普通积分兑换库存隔离；明细在分页抽屉中管理。</span></div>
+        <div class="inventory-actions"><el-button :icon="Refresh" :loading="inventoryLoading" @click="loadDailyInventory">刷新摘要</el-button><el-button type="primary" @click="openDailyInventoryDrawer">管理库存</el-button></div>
       </div>
       <div class="inventory-summary-grid">
         <button v-for="item in dailyCodeSummaries" :key="item.amount" type="button" class="inventory-summary" :class="{ active: dailyInventory.amount === item.amount }" @click="selectDailyAmount(item.amount)">
@@ -68,13 +68,6 @@
         <el-form-item label="兑换码（每行一个）"><el-input v-model="dailyInventory.codes" type="textarea" :rows="5" placeholder="CODE-001\nCODE-002\nCODE-003" /></el-form-item>
         <el-button type="primary" :loading="inventoryImporting" @click="importDailyInventory">导入抽奖库存</el-button>
       </el-form>
-      <el-table class="table-compact daily-inventory-table" :data="dailyCodes" stripe size="small" empty-text="暂无抽奖库存">
-        <el-table-column prop="code" label="兑换码" min-width="180" />
-        <el-table-column prop="amount" label="额度" width="90" />
-        <el-table-column prop="batch_name" label="批次" min-width="130" />
-        <el-table-column prop="status" label="状态" width="100" />
-        <el-table-column prop="redeem_url" label="兑换地址" min-width="180" show-overflow-tooltip />
-      </el-table>
 
       <div class="daily-prize-header reset-header">
         <div><strong>测试工具</strong><span>仅重置指定用户当天的抽奖次数；不会回收已经发出的兑换码，也不会返还已扣积分。</span></div>
@@ -86,6 +79,46 @@
         <el-button type="warning" :loading="dailyResetting" @click="resetDailyAttempts">重置今日抽奖次数</el-button>
       </el-form>
     </PanelSection>
+
+    <el-drawer v-model="dailyInventoryDrawer" title="每日抽奖库存" size="min(920px, 95vw)" destroy-on-close @closed="selectedDailyCodeIds = []">
+      <div class="drawer-toolbar">
+        <el-select v-model="dailyInventory.status" clearable placeholder="全部状态" @change="reloadDailyInventoryDrawer">
+          <el-option label="可用" value="available" /><el-option label="已分配" value="assigned" /><el-option label="已使用" value="used" />
+        </el-select>
+        <el-button :icon="Refresh" :loading="inventoryLoading" @click="loadDailyInventoryPage">刷新</el-button>
+        <span class="drawer-total">共 {{ dailyInventoryTotal }} 条</span>
+      </div>
+      <div v-if="selectedDailyCodeIds.length" class="selection-toolbar">
+        <strong>已选 {{ selectedDailyCodeIds.length }} 条</strong>
+        <el-button type="primary" @click="openDailyBatchEdit">批量编辑</el-button>
+        <el-button type="danger" @click="deleteSelectedDailyCodes">批量删除</el-button>
+        <span class="field-hint">仅可用兑换码可编辑或删除</span>
+      </div>
+      <el-table :data="dailyCodes" row-key="id" stripe size="small" class="inventory-table" @selection-change="onDailySelectionChange">
+        <el-table-column type="selection" width="48" :selectable="isDailyCodeSelectable" reserve-selection />
+        <el-table-column prop="code" label="兑换码" min-width="190" show-overflow-tooltip>
+          <template #default="{ row }"><span class="code-cell">{{ row.code }}</span><el-button text aria-label="复制兑换码" @click="copyDailyCode(row.code)">复制</el-button></template>
+        </el-table-column>
+        <el-table-column prop="amount" label="额度" width="80" />
+        <el-table-column prop="batch_name" label="批次" min-width="130" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" width="90" />
+        <el-table-column prop="redeem_url" label="兑换地址" min-width="180" show-overflow-tooltip />
+      </el-table>
+      <div class="drawer-pagination"><el-pagination v-model:current-page="dailyInventoryPage" v-model:page-size="dailyInventoryPageSize" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" :total="dailyInventoryTotal" @current-change="loadDailyInventoryPage" @size-change="handleDailyInventorySizeChange" /></div>
+    </el-drawer>
+
+    <el-dialog v-model="dailyBatchEditVisible" title="批量编辑抽奖库存" width="500px">
+      <p class="field-hint">已选择 {{ selectedDailyCodeIds.length }} 条，仅修改勾选的字段；空值会清空对应字段。</p>
+      <el-form label-position="top">
+        <el-checkbox v-model="dailyBatchForm.edit_redeem_url">修改兑换地址</el-checkbox>
+        <el-input v-model="dailyBatchForm.redeem_url" :disabled="!dailyBatchForm.edit_redeem_url" placeholder="留空可清除，或填写 https://..." />
+        <el-checkbox v-model="dailyBatchForm.edit_batch_name">修改批次名称</el-checkbox>
+        <el-input v-model="dailyBatchForm.batch_name" :disabled="!dailyBatchForm.edit_batch_name" maxlength="128" placeholder="留空可清除" />
+        <el-checkbox v-model="dailyBatchForm.edit_expires_at">修改有效期</el-checkbox>
+        <el-input v-model="dailyBatchForm.expires_at" :disabled="!dailyBatchForm.edit_expires_at" placeholder="RFC3339 时间；留空清除" />
+      </el-form>
+      <template #footer><el-button @click="dailyBatchEditVisible = false">取消</el-button><el-button type="primary" :loading="dailyBatchEditing" @click="submitDailyBatchEdit">保存修改</el-button></template>
+    </el-dialog>
 
     <div class="summary-grid">
       <div class="summary-card">
@@ -263,12 +296,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { MoreFilled, Plus, Refresh } from "@element-plus/icons-vue";
+import { CopyDocument, Delete, Edit, MoreFilled, Plus, Refresh } from "@element-plus/icons-vue";
 import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
 import { cancelLottery, createLottery, fetchLotteries, fetchLotteryEntries, fetchLotteryWinners } from "@/api/lottery";
-import { fetchDailyLotteryCodeSummary, fetchDailyLotteryCodes, fetchDailyLotteryConfig, fetchDailyLotteryPrizes, importDailyLotteryCodes, resetDailyLotteryAttempts, updateDailyLottery, type DailyLotteryCode, type DailyLotteryCodeSummary, type DailyLotteryPrize } from "@/api/dailyLottery";
+import { batchDeleteDailyLotteryCodes, batchUpdateDailyLotteryCodes, fetchDailyLotteryCodeSummary, fetchDailyLotteryCodes, fetchDailyLotteryConfig, fetchDailyLotteryPrizes, importDailyLotteryCodes, resetDailyLotteryAttempts, updateDailyLottery, type DailyLotteryCode, type DailyLotteryCodeSummary, type DailyLotteryPrize } from "@/api/dailyLottery";
 import type { ChatID, LotteryEntryRecord, LotteryPayload, LotteryRecord } from "@/types/api";
 import { parseChinaLocalDateTimeToISO } from "@/utils/datetime";
 import { parseNumericId, formatDateTime, errorMessage } from "@/utils/helpers";
@@ -292,8 +325,16 @@ const dailyCodes = ref<DailyLotteryCode[]>([]);
 const dailyCodeSummaries = ref<DailyLotteryCodeSummary[]>([]);
 const inventoryLoading = ref(false);
 const inventoryImporting = ref(false);
+const dailyInventoryDrawer = ref(false);
+const dailyInventoryPage = ref(1);
+const dailyInventoryPageSize = ref(20);
+const dailyInventoryTotal = ref(0);
+const selectedDailyCodeIds = ref<string[]>([]);
+const dailyBatchEditVisible = ref(false);
+const dailyBatchEditing = ref(false);
+const dailyBatchForm = reactive({ edit_redeem_url: false, edit_batch_name: false, edit_expires_at: false, redeem_url: "", batch_name: "", expires_at: "" });
 const dailyResetting = ref(false);
-const dailyInventory = reactive({ amount: undefined as number | undefined, amountInput: 10, batchName: "", redeemURL: "", codes: "" });
+const dailyInventory = reactive({ amount: undefined as number | undefined, amountInput: 10, batchName: "", redeemURL: "", codes: "", status: "" });
 const dailyReset = reactive({ userId: undefined as number | undefined });
 const dailyForm = reactive({ enabled: false, daily_attempts: 3, cost_points: 1, paid_enabled: false, guarantee_on_last: true });
 const form = reactive<LotteryPayload>({
@@ -515,6 +556,7 @@ async function loadDailyLottery(): Promise<void> {
     dailyPrizes.value = [];
     dailyCodes.value = [];
     dailyCodeSummaries.value = [];
+    dailyInventoryTotal.value = 0;
     Object.assign(dailyForm, { enabled: false, daily_attempts: 3, cost_points: 1, paid_enabled: false, guarantee_on_last: true });
     return;
   }
@@ -535,20 +577,65 @@ async function loadDailyInventory(): Promise<void> {
   if (!selectedChatId.value) { dailyCodes.value = []; dailyCodeSummaries.value = []; return; }
   inventoryLoading.value = true;
   try {
-    const [codes, summaries] = await Promise.all([
-      fetchDailyLotteryCodes(selectedChatId.value, dailyInventory.amount),
-      fetchDailyLotteryCodeSummary(selectedChatId.value),
-    ]);
-    dailyCodes.value = codes.items;
+    const summaries = await fetchDailyLotteryCodeSummary(selectedChatId.value);
     dailyCodeSummaries.value = summaries.items;
   } catch (error) { ElMessage.error(errorMessage(error)); }
   finally { inventoryLoading.value = false; }
 }
 
+async function loadDailyInventoryPage(): Promise<void> {
+  if (!selectedChatId.value || !dailyInventoryDrawer.value) return;
+  inventoryLoading.value = true;
+  try {
+    const result = await fetchDailyLotteryCodes(selectedChatId.value, dailyInventory.amount, dailyInventory.status, dailyInventoryPage.value, dailyInventoryPageSize.value);
+    dailyCodes.value = result.items;
+    dailyInventoryTotal.value = result.total;
+  } catch (error) { ElMessage.error(errorMessage(error)); }
+  finally { inventoryLoading.value = false; }
+}
+
+function openDailyInventoryDrawer(): void { dailyInventoryDrawer.value = true; dailyInventoryPage.value = 1; void loadDailyInventoryPage(); }
+function reloadDailyInventoryDrawer(): void { dailyInventoryPage.value = 1; selectedDailyCodeIds.value = []; void loadDailyInventoryPage(); }
+function handleDailyInventorySizeChange(size: number): void { dailyInventoryPageSize.value = size; dailyInventoryPage.value = 1; void loadDailyInventoryPage(); }
+function isDailyCodeSelectable(row: DailyLotteryCode): boolean { return row.status === "available"; }
+function onDailySelectionChange(rows: DailyLotteryCode[]): void {
+  const selected = new Set(selectedDailyCodeIds.value);
+  dailyCodes.value.forEach((row) => selected.delete(row.id));
+  rows.filter((row) => row.status === "available").forEach((row) => selected.add(row.id));
+  if (selected.size > 500) { ElMessage.warning("最多只能批量选择 500 条"); return; }
+  selectedDailyCodeIds.value = [...selected];
+}
+async function copyDailyCode(code: string): Promise<void> {
+  try { await navigator.clipboard.writeText(code); ElMessage.success("兑换码已复制"); } catch { ElMessage.warning("复制失败，请手动复制"); }
+}
+function openDailyBatchEdit(): void {
+  Object.assign(dailyBatchForm, { edit_redeem_url: false, edit_batch_name: false, edit_expires_at: false, redeem_url: "", batch_name: "", expires_at: "" });
+  dailyBatchEditVisible.value = true;
+}
+async function submitDailyBatchEdit(): Promise<void> {
+  if (!dailyBatchForm.edit_redeem_url && !dailyBatchForm.edit_batch_name && !dailyBatchForm.edit_expires_at) { ElMessage.warning("请选择至少一个要修改的字段"); return; }
+  const chatID = parseNumericId(selectedChatId.value);
+  if (chatID === undefined) { ElMessage.warning("请选择有效群组"); return; }
+  const payload: { chat_id: ChatID; ids: string[]; redeem_url?: string; batch_name?: string; expires_at?: string } = { chat_id: chatID, ids: [...selectedDailyCodeIds.value] };
+  if (dailyBatchForm.edit_redeem_url) payload.redeem_url = dailyBatchForm.redeem_url.trim();
+  if (dailyBatchForm.edit_batch_name) payload.batch_name = dailyBatchForm.batch_name.trim();
+  if (dailyBatchForm.edit_expires_at) payload.expires_at = dailyBatchForm.expires_at.trim();
+  dailyBatchEditing.value = true;
+  try { const result = await batchUpdateDailyLotteryCodes(payload); ElMessage.success(`已修改 ${result.updated} 条，跳过 ${result.skipped} 条`); dailyBatchEditVisible.value = false; selectedDailyCodeIds.value = []; await loadDailyInventory(); await loadDailyInventoryPage(); } catch (error) { ElMessage.error(errorMessage(error)); } finally { dailyBatchEditing.value = false; }
+}
+async function deleteSelectedDailyCodes(): Promise<void> {
+  const chatID = parseNumericId(selectedChatId.value);
+  if (chatID === undefined || !selectedDailyCodeIds.value.length) return;
+  try { await ElMessageBox.confirm(`确认删除选中的 ${selectedDailyCodeIds.value.length} 条可用兑换码？已分配和已使用记录不会删除。`, "批量删除抽奖库存", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "取消" }); } catch { return; }
+  try { const result = await batchDeleteDailyLotteryCodes({ chat_id: chatID, ids: selectedDailyCodeIds.value }); ElMessage.success(`已删除 ${result.deleted} 条，跳过 ${result.skipped} 条`); selectedDailyCodeIds.value = []; await loadDailyInventory(); await loadDailyInventoryPage(); } catch (error) { ElMessage.error(errorMessage(error)); }
+}
+
 function selectDailyAmount(amount?: number): void {
   dailyInventory.amount = amount;
   if (amount !== undefined) dailyInventory.amountInput = amount;
+  dailyInventoryPage.value = 1;
   void loadDailyInventory();
+  if (dailyInventoryDrawer.value) void loadDailyInventoryPage();
 }
 
 async function importDailyInventory(): Promise<void> {
@@ -635,7 +722,12 @@ async function resetDailyAttempts(): Promise<void> {
   }
 }
 
-watch(selectedChatId, () => { void loadDailyLottery(); });
+watch(selectedChatId, () => {
+  dailyInventoryPage.value = 1;
+  selectedDailyCodeIds.value = [];
+  void loadDailyLottery();
+  if (dailyInventoryDrawer.value) void loadDailyInventoryPage();
+});
 onMounted(() => { void loadLotteries(); void loadDailyLottery(); });
 </script>
 
@@ -712,6 +804,15 @@ onMounted(() => { void loadLotteries(); void loadDailyLottery(); });
   color: var(--app-muted);
   font-size: 12px;
 }
+.inventory-actions, .drawer-toolbar, .selection-toolbar { display: flex; align-items: center; gap: 10px; }
+.drawer-toolbar { margin-bottom: 12px; }
+.drawer-total { margin-left: auto; color: var(--app-muted); font-size: 13px; }
+.selection-toolbar { flex-wrap: wrap; margin-bottom: 12px; }
+.inventory-table { width: 100%; }
+.code-cell { display: inline-block; max-width: calc(100% - 48px); overflow: hidden; text-overflow: ellipsis; vertical-align: middle; white-space: nowrap; }
+.drawer-pagination { display: flex; justify-content: flex-end; margin-top: 16px; overflow-x: auto; }
+.el-dialog .el-checkbox { display: block; margin: 12px 0 6px; }
+.el-dialog .el-input { margin-bottom: 8px; }
 .daily-total {
   margin-top: 10px;
 }

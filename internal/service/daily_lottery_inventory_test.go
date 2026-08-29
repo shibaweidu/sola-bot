@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/dabowin/sola/internal/bot"
 	"github.com/dabowin/sola/internal/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -38,6 +40,30 @@ func TestDailyLotteryInventoryImportAndSummary(t *testing.T) {
 	items, err := svc.ListCodes(ctx, 1001, func() *int { value := 10; return &value }(), "available", 20)
 	if err != nil || len(items) != 3 {
 		t.Fatalf("filtered items = %+v, err=%v", items, err)
+	}
+}
+
+func TestDailyLotteryInventoryBatchOperations(t *testing.T) {
+	st := newServiceTestStore(t)
+	createDailyLotteryInventoryTables(t, st.DB)
+	now := time.Now()
+	available := model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "DAILY-A", Amount: 10, Status: "available", CreatedAt: now, UpdatedAt: now}
+	assigned := model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "DAILY-B", Amount: 10, Status: "assigned", CreatedAt: now, UpdatedAt: now}
+	if err := st.DB.Create(&available).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB.Create(&assigned).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewDailyLotteryService(st)
+	url := "https://new.example/redeem"
+	result, err := svc.BatchUpdateCodes(context.Background(), bot.DailyLotteryCodeBatchUpdateRequest{ChatID: 1001, IDs: []string{available.ID.String(), assigned.ID.String()}, RedeemURL: &url})
+	if err != nil || result.Updated != 1 || result.Skipped != 1 {
+		t.Fatalf("batch update = %+v, err=%v", result, err)
+	}
+	result, err = svc.BatchDeleteCodes(context.Background(), bot.DailyLotteryCodeBatchDeleteRequest{ChatID: 1001, IDs: []string{available.ID.String(), assigned.ID.String()}})
+	if err != nil || result.Deleted != 1 || result.Skipped != 1 {
+		t.Fatalf("batch delete = %+v, err=%v", result, err)
 	}
 }
 

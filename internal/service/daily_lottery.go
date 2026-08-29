@@ -66,6 +66,9 @@ func (s *DailyLotteryService) ListPrizes(ctx context.Context, chatID int64) ([]b
 	if s == nil || s.store == nil || s.store.DB == nil {
 		return []bot.DailyLotteryPrize{}, nil
 	}
+	if err := s.syncInventoryPrizes(ctx, chatID); err != nil {
+		return nil, err
+	}
 	var rows []model.DailyLotteryPrize
 	if err := s.store.DB.WithContext(ctx).Where("chat_id = ?", chatID).Order("amount asc").Find(&rows).Error; err != nil {
 		return nil, err
@@ -116,15 +119,6 @@ func (s *DailyLotteryService) ReplacePrizes(ctx context.Context, chatID int64, p
 	if s == nil || s.store == nil || s.store.DB == nil {
 		return prizes, nil
 	}
-	for _, prize := range prizes {
-		available, err := s.availableCount(ctx, chatID, prize.Amount)
-		if err != nil {
-			return nil, err
-		}
-		if available == 0 {
-			return nil, fmt.Errorf("额度 %d 暂无可用兑换码", prize.Amount)
-		}
-	}
 	err := s.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("chat_id = ?", chatID).Delete(&model.DailyLotteryPrize{}).Error; err != nil {
 			return err
@@ -141,6 +135,55 @@ func (s *DailyLotteryService) ReplacePrizes(ctx context.Context, chatID int64, p
 		return nil, err
 	}
 	return s.ListPrizes(ctx, chatID)
+}
+
+// syncInventoryPrizes makes newly imported inventory visible in the prize
+// editor without overwriting existing weights or enabled flags. New amounts
+// start enabled with a conservative default weight and can be adjusted in the
+// admin UI before saving the pool.
+func (s *DailyLotteryService) syncInventoryPrizes(ctx context.Context, chatID int64) error {
+	if s == nil || s.store == nil || s.store.DB == nil || chatID == 0 {
+		return nil
+	}
+	var amounts []int
+	if err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryCode{}).
+		Where("chat_id = ?", chatID).Distinct("amount").Pluck("amount", &amounts).Error; err != nil {
+		return err
+	}
+	var enabledWeight int64
+	if err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryPrize{}).
+		Where("chat_id = ? AND enabled = ?", chatID, true).Select("COALESCE(SUM(weight), 0)").Scan(&enabledWeight).Error; err != nil {
+		return err
+	}
+	for _, amount := range amounts {
+		if amount <= 0 {
+			continue
+		}
+		var count int64
+		if err := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryPrize{}).
+			Where("chat_id = ? AND amount = ?", chatID, amount).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		weight := 100
+		enabled := true
+		if enabledWeight >= 1000 {
+			enabled = false
+			weight = 1
+		} else if remaining := int(1000 - enabledWeight); remaining < weight {
+			weight = remaining
+		}
+		row := model.DailyLotteryPrize{ChatID: chatID, Amount: amount, Weight: weight, Enabled: enabled, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+		if err := s.store.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+			return err
+		}
+		if enabled {
+			enabledWeight += int64(weight)
+		}
+	}
+	return nil
 }
 
 func (s *DailyLotteryService) Status(ctx context.Context, chatID, userID int64) (bot.DailyLotteryStatus, error) {
@@ -171,6 +214,12 @@ func (s *DailyLotteryService) Draw(ctx context.Context, chatID, userID int64) (b
 	}
 	if s == nil || s.store == nil || s.store.DB == nil {
 		return bot.DailyLotteryDrawResult{}, errors.New("抽奖服务尚未接入数据库")
+	}
+	// A user may press a draw button from an older panel without first
+	// refreshing it. Synchronize newly imported inventory amounts before
+	// selecting the prize so those codes are immediately eligible.
+	if err := s.syncInventoryPrizes(ctx, chatID); err != nil {
+		return bot.DailyLotteryDrawResult{}, err
 	}
 	date := time.Now().In(chinaLocation()).Format("2006-01-02")
 	var result bot.DailyLotteryDrawResult

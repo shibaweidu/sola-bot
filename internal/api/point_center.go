@@ -95,12 +95,12 @@ func (s *Server) ListExchangeCodes(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "amount must be greater than zero")
 		return
 	}
-	items, err := s.deps.PointCenter.ListExchangeCodes(c.Request.Context(), query)
+	page, err := s.deps.PointCenter.ListExchangeCodesPage(c.Request.Context(), query)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, page)
 }
 
 func (s *Server) ImportExchangeCodes(c *gin.Context) {
@@ -138,4 +138,46 @@ func (s *Server) SummarizeExchangeCodes(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (s *Server) BatchUpdateExchangeCodes(c *gin.Context) {
+	if s.deps.PointCenter == nil {
+		writeError(c, http.StatusInternalServerError, "point center service is not configured")
+		return
+	}
+	if !s.requireBotMenuAccess(c) {
+		return
+	}
+	var req ExchangeCodeBatchUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.deps.PointCenter.BatchUpdateExchangeCodes(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) BatchDeleteExchangeCodes(c *gin.Context) {
+	if s.deps.PointCenter == nil {
+		writeError(c, http.StatusInternalServerError, "point center service is not configured")
+		return
+	}
+	if !s.requireBotMenuAccess(c) {
+		return
+	}
+	var req ExchangeCodeBatchDeleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.deps.PointCenter.BatchDeleteExchangeCodes(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

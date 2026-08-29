@@ -48,3 +48,27 @@ func TestPointCenterExchangeCodeAmountFilterAndSummary(t *testing.T) {
 		t.Fatalf("50 summary = %+v", summary[1])
 	}
 }
+
+func TestPointCenterExchangeCodeBatchOperations(t *testing.T) {
+	st := newServiceTestStore(t)
+	createPointCenterTables(t, st.DB)
+	now := time.Now()
+	available := model.ExchangeCode{BaseModel: model.BaseModel{ID: uuid.New(), CreatedAt: now, UpdatedAt: now}, Code: "BATCH-A", Amount: 10, Status: "available", RedeemURL: "https://old.example"}
+	assigned := model.ExchangeCode{BaseModel: model.BaseModel{ID: uuid.New(), CreatedAt: now, UpdatedAt: now}, Code: "BATCH-B", Amount: 10, Status: "assigned", RedeemURL: "https://old.example"}
+	if err := st.DB.Create(&available).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB.Create(&assigned).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := &pointCenterAPIService{service: NewPointCenterService(st, "12345:test")}
+	url := "https://new.example/redeem"
+	result, err := service.BatchUpdateExchangeCodes(context.Background(), api.ExchangeCodeBatchUpdateRequest{IDs: []string{available.ID.String(), assigned.ID.String()}, RedeemURL: &url})
+	if err != nil || result.Updated != 1 || result.Skipped != 1 {
+		t.Fatalf("batch update = %+v, err=%v", result, err)
+	}
+	result, err = service.BatchDeleteExchangeCodes(context.Background(), api.ExchangeCodeBatchDeleteRequest{IDs: []string{available.ID.String(), assigned.ID.String()}})
+	if err != nil || result.Deleted != 1 || result.Skipped != 1 {
+		t.Fatalf("batch delete = %+v, err=%v", result, err)
+	}
+}

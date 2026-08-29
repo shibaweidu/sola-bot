@@ -30,6 +30,18 @@ func (s *dailyLotteryAPIService) ListCodes(ctx context.Context, chatID int64, am
 	return result, nil
 }
 
+func (s *dailyLotteryAPIService) ListCodesPage(ctx context.Context, chatID int64, amount *int, status string, page, pageSize int) (api.DailyLotteryCodePage, error) {
+	result, err := s.service.ListCodesPage(ctx, chatID, amount, status, page, pageSize)
+	if err != nil {
+		return api.DailyLotteryCodePage{}, err
+	}
+	items := make([]api.DailyLotteryCode, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, api.DailyLotteryCode{ID: item.ID, ChatID: item.ChatID, Code: item.Code, Amount: item.Amount, BatchName: item.BatchName, RedeemURL: item.RedeemURL, ExpiresAt: item.ExpiresAt, Status: item.Status, AssignedUser: item.AssignedUser, AssignedAt: item.AssignedAt})
+	}
+	return api.DailyLotteryCodePage{Items: items, Total: result.Total, Page: result.Page, PageSize: result.PageSize}, nil
+}
+
 func (s *dailyLotteryAPIService) SummarizeCodes(ctx context.Context, chatID int64) ([]api.DailyLotteryCodeSummary, error) {
 	items, err := s.service.SummarizeCodes(ctx, chatID)
 	if err != nil {
@@ -45,6 +57,16 @@ func (s *dailyLotteryAPIService) SummarizeCodes(ctx context.Context, chatID int6
 func (s *dailyLotteryAPIService) ImportCodes(ctx context.Context, req api.DailyLotteryCodeImportRequest) (api.DailyLotteryCodeImportResult, error) {
 	result, err := s.service.ImportCodes(ctx, bot.DailyLotteryCodeImportRequest{ChatID: req.ChatID, Amount: req.Amount, BatchName: req.BatchName, RedeemURL: req.RedeemURL, ExpiresAt: req.ExpiresAt, Codes: req.Codes})
 	return api.DailyLotteryCodeImportResult{Imported: result.Imported, Skipped: result.Skipped}, err
+}
+
+func (s *dailyLotteryAPIService) BatchUpdateCodes(ctx context.Context, req api.DailyLotteryCodeBatchUpdateRequest) (api.InventoryBatchResult, error) {
+	result, err := s.service.BatchUpdateCodes(ctx, bot.DailyLotteryCodeBatchUpdateRequest{ChatID: req.ChatID, IDs: req.IDs, RedeemURL: req.RedeemURL, BatchName: req.BatchName, ExpiresAt: req.ExpiresAt})
+	return api.InventoryBatchResult{Updated: result.Updated, Deleted: result.Deleted, Skipped: result.Skipped}, err
+}
+
+func (s *dailyLotteryAPIService) BatchDeleteCodes(ctx context.Context, req api.DailyLotteryCodeBatchDeleteRequest) (api.InventoryBatchResult, error) {
+	result, err := s.service.BatchDeleteCodes(ctx, bot.DailyLotteryCodeBatchDeleteRequest{ChatID: req.ChatID, IDs: req.IDs})
+	return api.InventoryBatchResult{Updated: result.Updated, Deleted: result.Deleted, Skipped: result.Skipped}, err
 }
 
 func (s *dailyLotteryAPIService) UpdateConfig(ctx context.Context, req api.DailyLotteryUpdateRequest) (api.DailyLotteryConfig, error) {

@@ -64,12 +64,25 @@ export function resetReferralForTesting(chatId: ChatID, userId: number): Promise
 	});
 }
 
-export function fetchExchangeCodes(status = "", amount?: number): Promise<{ items: ExchangeCodeRecord[] }> {
+export interface InventoryPage<T> { items: T[]; total: number; page: number; page_size: number }
+export interface InventoryBatchResult { updated: number; deleted: number; skipped: number }
+
+export function fetchExchangeCodes(status = "", amount?: number, page = 1, pageSize = 20): Promise<InventoryPage<ExchangeCodeRecord>> {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   if (amount !== undefined) params.set("amount", String(amount));
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  return request<{ items: ExchangeCodeRecord[] }>(`/point-center/codes${suffix}`);
+  return request<InventoryPage<ExchangeCodeRecord>>(`/point-center/codes${suffix}`);
+}
+
+export function batchUpdateExchangeCodes(payload: { ids: string[]; redeem_url?: string; batch_name?: string; expires_at?: string }): Promise<InventoryBatchResult> {
+  return request<InventoryBatchResult>("/point-center/codes/batch", { method: "PATCH", body: payload });
+}
+
+export function batchDeleteExchangeCodes(ids: string[]): Promise<InventoryBatchResult> {
+  return request<InventoryBatchResult>("/point-center/codes/batch", { method: "DELETE", body: { ids } });
 }
 
 export function fetchExchangeCodeSummary(): Promise<{ items: ExchangeCodeSummary[] }> {

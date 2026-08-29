@@ -123,7 +123,7 @@
             </PanelSection>
           </el-col>
           <el-col :xs="24" :md="14">
-            <PanelSection title="库存列表" description="兑换成功后兑换码会自动变为已分配。">
+            <PanelSection title="库存摘要" description="明细已移至分页管理抽屉，避免兑换码过多撑长页面。">
               <div v-if="summaries.length" class="inventory-summary-grid">
                 <button v-for="item in summaries" :key="item.amount" type="button" class="inventory-summary" :class="{ active: inventory.amountFilter === item.amount }" @click="selectAmount(item.amount)">
                   <strong>{{ item.amount }} 额度</strong>
@@ -132,35 +132,66 @@
                 </button>
                 <button v-if="inventory.amountFilter !== undefined" type="button" class="clear-amount" @click="selectAmount(undefined)">查看全部额度</button>
               </div>
-              <div class="inventory-toolbar">
-                <el-select v-model="inventory.status" clearable placeholder="全部状态" @change="loadCodes">
-                  <el-option label="可用" value="available" /><el-option label="已分配" value="assigned" /><el-option label="已使用" value="used" />
-                </el-select>
-                <el-button :icon="Refresh" @click="loadInventory">刷新库存</el-button>
+              <div class="inventory-summary-actions">
+                <span class="field-hint">点击额度卡片可直接筛选明细。</span>
+                <el-button type="primary" :icon="Edit" @click="openInventoryDrawer">管理库存</el-button>
               </div>
-              <el-table :data="codes" stripe size="small" max-height="520">
-                <el-table-column prop="code" label="兑换码" min-width="180" show-overflow-tooltip />
-                <el-table-column prop="batch_name" label="批次" min-width="120" />
-                <el-table-column prop="amount" label="额度" width="70" />
-                <el-table-column prop="status" label="状态" width="90" />
-                <el-table-column prop="redeem_url" label="兑换地址" min-width="150" show-overflow-tooltip />
-              </el-table>
             </PanelSection>
           </el-col>
         </el-row>
       </el-tab-pane>
     </el-tabs>
+
+    <el-drawer v-model="inventoryDrawer" title="兑换码库存" size="min(920px, 95vw)" destroy-on-close @closed="selectedCodeIds = []">
+      <div class="drawer-toolbar">
+        <el-select v-model="inventory.status" clearable placeholder="全部状态" @change="reloadInventoryDrawer">
+          <el-option label="可用" value="available" /><el-option label="已分配" value="assigned" /><el-option label="已使用" value="used" />
+        </el-select>
+        <el-button :icon="Refresh" :loading="inventoryLoading" @click="reloadInventoryDrawer">刷新</el-button>
+        <span class="drawer-total">共 {{ inventoryTotal }} 条</span>
+      </div>
+      <div class="selection-toolbar" v-if="selectedCodeIds.length">
+        <strong>已选 {{ selectedCodeIds.length }} 条</strong>
+        <el-button type="primary" :icon="Edit" @click="openBatchEdit">批量编辑</el-button>
+        <el-button type="danger" :icon="Delete" @click="deleteSelectedCodes">批量删除</el-button>
+        <span class="field-hint">仅可用兑换码可编辑或删除</span>
+      </div>
+      <el-table ref="codeTable" :data="codes" row-key="id" stripe size="small" class="inventory-table" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="48" :selectable="isCodeSelectable" reserve-selection />
+        <el-table-column prop="code" label="兑换码" min-width="190" show-overflow-tooltip>
+          <template #default="{ row }"><span class="code-cell">{{ row.code }}</span><el-button text :icon="CopyDocument" aria-label="复制兑换码" @click="copyCode(row.code)" /></template>
+        </el-table-column>
+        <el-table-column prop="batch_name" label="批次" min-width="130" show-overflow-tooltip />
+        <el-table-column prop="amount" label="额度" width="78" />
+        <el-table-column prop="status" label="状态" width="90" />
+        <el-table-column prop="redeem_url" label="兑换地址" min-width="180" show-overflow-tooltip />
+      </el-table>
+      <div class="drawer-pagination"><el-pagination v-model:current-page="inventoryPage" v-model:page-size="inventoryPageSize" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" :total="inventoryTotal" @current-change="loadCodes" @size-change="handleInventorySizeChange" /></div>
+    </el-drawer>
+
+    <el-dialog v-model="batchEditVisible" title="批量编辑库存" width="500px">
+      <p class="field-hint">已选择 {{ selectedCodeIds.length }} 条，仅修改勾选的字段；空值会清空对应字段。</p>
+      <el-form label-position="top">
+        <el-checkbox v-model="batchForm.edit_redeem_url">修改兑换地址</el-checkbox>
+        <el-input v-model="batchForm.redeem_url" :disabled="!batchForm.edit_redeem_url" placeholder="留空可清除，或填写 https://..." />
+        <el-checkbox v-model="batchForm.edit_batch_name">修改批次名称</el-checkbox>
+        <el-input v-model="batchForm.batch_name" :disabled="!batchForm.edit_batch_name" maxlength="128" placeholder="留空可清除" />
+        <el-checkbox v-model="batchForm.edit_expires_at">修改有效期</el-checkbox>
+        <el-input v-model="batchForm.expires_at" :disabled="!batchForm.edit_expires_at" placeholder="RFC3339，例如 2026-12-31T23:59:59Z；留空清除" />
+      </el-form>
+      <template #footer><el-button @click="batchEditVisible = false">取消</el-button><el-button type="primary" :loading="batchEditing" @click="submitBatchEdit">保存修改</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Check, Refresh } from "@element-plus/icons-vue";
+import { Check, CopyDocument, Delete, Edit, Refresh } from "@element-plus/icons-vue";
 import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
-import { fetchExchangeCodeSummary, fetchExchangeCodes, fetchPointCenterConfig, importExchangeCodes, resetReferralForTesting, updatePointCenterConfig, type ExchangeCodeRecord, type ExchangeCodeSummary, type PointCenterConfig } from "@/api/pointCenter";
+import { batchDeleteExchangeCodes, batchUpdateExchangeCodes, fetchExchangeCodeSummary, fetchExchangeCodes, fetchPointCenterConfig, importExchangeCodes, resetReferralForTesting, updatePointCenterConfig, type ExchangeCodeRecord, type ExchangeCodeSummary, type PointCenterConfig } from "@/api/pointCenter";
 import { fetchUserPointDetail, updateUserPoints } from "@/api/points";
 
 const selectedChatId = ref("");
@@ -177,6 +208,15 @@ const adjustReason = ref("");
 const adjustResult = ref<{ before: number; delta: number; after: number }>();
 const codes = ref<ExchangeCodeRecord[]>([]);
 const summaries = ref<ExchangeCodeSummary[]>([]);
+const inventoryDrawer = ref(false);
+const inventoryLoading = ref(false);
+const inventoryPage = ref(1);
+const inventoryPageSize = ref(20);
+const inventoryTotal = ref(0);
+const selectedCodeIds = ref<string[]>([]);
+const batchEditVisible = ref(false);
+const batchEditing = ref(false);
+const batchForm = reactive({ edit_redeem_url: false, edit_batch_name: false, edit_expires_at: false, redeem_url: "", batch_name: "", expires_at: "" });
 const form = reactive<PointCenterConfig>({ chat_id: 0, invite_enabled: true, inviter_reward: 100, invitee_reward: 20, sign_enabled: true, sign_reward: 1, exchange_enabled: true, exchange_minimum: 10, exchange_rate: 1, exchange_url: "", exchange_instructions: "", purchase_url: "", purchase_text: "", shop_url: "", shop_text: "", invite_text: "", invite_page_template: "", invite_join_url: "", invite_join_text: "", invite_success_text: "", points_text: "", sign_text: "", exchange_text: "", rank_text: "" });
 const inventory = reactive({ batch_name: "", amount: 10, redeem_url: "", codes: "", status: "", amountFilter: undefined as number | undefined });
 const inviteTemplatePreview = computed(() => {
@@ -197,18 +237,56 @@ async function loadConfig(): Promise<void> {
   try { Object.assign(form, await fetchPointCenterConfig(selectedChatId.value)); } catch { ElMessage.error("积分中心配置加载失败"); } finally { loading.value = false; }
 }
 async function loadCodes(): Promise<void> {
-  try { codes.value = (await fetchExchangeCodes(inventory.status, inventory.amountFilter)).items; } catch { ElMessage.error("兑换码库存加载失败"); }
+  if (!inventoryDrawer.value) return;
+  inventoryLoading.value = true;
+  try {
+    const result = await fetchExchangeCodes(inventory.status, inventory.amountFilter, inventoryPage.value, inventoryPageSize.value);
+    codes.value = result.items;
+    inventoryTotal.value = result.total;
+  } catch { ElMessage.error("兑换码库存加载失败"); }
+  finally { inventoryLoading.value = false; }
 }
 async function loadInventory(): Promise<void> {
   try {
-    const result = await Promise.all([fetchExchangeCodes(inventory.status, inventory.amountFilter), fetchExchangeCodeSummary()]);
-    codes.value = result[0].items;
-    summaries.value = result[1].items;
+    summaries.value = (await fetchExchangeCodeSummary()).items;
   } catch { ElMessage.error("兑换码库存加载失败"); }
 }
 function selectAmount(amount: number | undefined): void {
   inventory.amountFilter = amount;
-  void loadCodes();
+  inventoryPage.value = 1;
+  if (inventoryDrawer.value) void loadCodes();
+}
+function openInventoryDrawer(): void { inventoryDrawer.value = true; inventoryPage.value = 1; void loadCodes(); }
+function reloadInventoryDrawer(): void { inventoryPage.value = 1; selectedCodeIds.value = []; void loadCodes(); }
+function handleInventorySizeChange(size: number): void { inventoryPageSize.value = size; inventoryPage.value = 1; void loadCodes(); }
+function isCodeSelectable(row: ExchangeCodeRecord): boolean { return row.status === "available"; }
+function onSelectionChange(rows: ExchangeCodeRecord[]): void {
+  const selected = new Set(selectedCodeIds.value);
+  codes.value.forEach((row) => selected.delete(row.id));
+  rows.filter((row) => row.status === "available").forEach((row) => selected.add(row.id));
+  if (selected.size > 500) { ElMessage.warning("最多只能批量选择 500 条"); return; }
+  selectedCodeIds.value = [...selected];
+}
+async function copyCode(code: string): Promise<void> {
+  try { await navigator.clipboard.writeText(code); ElMessage.success("兑换码已复制"); } catch { ElMessage.warning("复制失败，请手动复制"); }
+}
+function openBatchEdit(): void {
+  Object.assign(batchForm, { edit_redeem_url: false, edit_batch_name: false, edit_expires_at: false, redeem_url: "", batch_name: "", expires_at: "" });
+  batchEditVisible.value = true;
+}
+async function submitBatchEdit(): Promise<void> {
+  if (!batchForm.edit_redeem_url && !batchForm.edit_batch_name && !batchForm.edit_expires_at) { ElMessage.warning("请选择至少一个要修改的字段"); return; }
+  const payload: { ids: string[]; redeem_url?: string; batch_name?: string; expires_at?: string } = { ids: [...selectedCodeIds.value] };
+  if (batchForm.edit_redeem_url) payload.redeem_url = batchForm.redeem_url.trim();
+  if (batchForm.edit_batch_name) payload.batch_name = batchForm.batch_name.trim();
+  if (batchForm.edit_expires_at) payload.expires_at = batchForm.expires_at.trim();
+  batchEditing.value = true;
+  try { const result = await batchUpdateExchangeCodes(payload); ElMessage.success(`已修改 ${result.updated} 条，跳过 ${result.skipped} 条`); batchEditVisible.value = false; selectedCodeIds.value = []; await loadInventory(); await loadCodes(); } catch { ElMessage.error("批量编辑失败，请检查字段内容"); } finally { batchEditing.value = false; }
+}
+async function deleteSelectedCodes(): Promise<void> {
+  if (!selectedCodeIds.value.length) return;
+  try { await ElMessageBox.confirm(`确认删除选中的 ${selectedCodeIds.value.length} 条可用兑换码？已分配和已使用记录不会删除。`, "批量删除库存", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "取消" }); } catch { return; }
+  try { const result = await batchDeleteExchangeCodes(selectedCodeIds.value); ElMessage.success(`已删除 ${result.deleted} 条，跳过 ${result.skipped} 条`); selectedCodeIds.value = []; await loadInventory(); await loadCodes(); } catch { ElMessage.error("批量删除失败"); }
 }
 async function loadAll(): Promise<void> { await Promise.all([loadConfig(), loadInventory()]); }
 async function saveConfig(): Promise<void> {
@@ -263,7 +341,16 @@ onMounted(loadAll);
 .switch-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
 .number-grid, .copy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .switch-row { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--app-border); padding: 10px 12px; border-radius: 8px; }
-.inventory-toolbar { display: flex; gap: 10px; margin-bottom: 12px; }
+.inventory-toolbar, .drawer-toolbar, .inventory-summary-actions, .selection-toolbar { display: flex; gap: 10px; align-items: center; }
+.drawer-toolbar { margin-bottom: 12px; }
+.drawer-total { margin-left: auto; color: var(--app-muted); font-size: 13px; }
+.inventory-summary-actions { justify-content: space-between; margin-top: 12px; }
+.selection-toolbar { margin-bottom: 12px; flex-wrap: wrap; }
+.inventory-table { width: 100%; }
+.code-cell { display: inline-block; max-width: calc(100% - 34px); overflow: hidden; text-overflow: ellipsis; vertical-align: middle; white-space: nowrap; }
+.drawer-pagination { display: flex; justify-content: flex-end; margin-top: 16px; overflow-x: auto; }
+.el-dialog .el-checkbox { display: block; margin: 12px 0 6px; }
+.el-dialog .el-input { margin-bottom: 8px; }
 .inventory-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .inventory-summary { display: flex; min-width: 138px; flex-direction: column; align-items: flex-start; gap: 3px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface-2); padding: 9px 11px; color: var(--app-text); cursor: pointer; text-align: left; }
 .inventory-summary:hover, .inventory-summary.active { border-color: var(--app-primary); }

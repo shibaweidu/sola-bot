@@ -59,11 +59,24 @@ export function updateDailyLottery(payload: {
   return request<DailyLotteryConfig>("/point-center/daily-lottery/config", { method: "PUT", body: payload });
 }
 
-export function fetchDailyLotteryCodes(chatId: ChatID, amount?: number, status?: string): Promise<{ items: DailyLotteryCode[] }> {
+export interface InventoryPage<T> { items: T[]; total: number; page: number; page_size: number }
+export interface InventoryBatchResult { updated: number; deleted: number; skipped: number }
+
+export function fetchDailyLotteryCodes(chatId: ChatID, amount?: number, status?: string, page = 1, pageSize = 20): Promise<InventoryPage<DailyLotteryCode>> {
   const params = new URLSearchParams({ chat_id: String(chatId) });
   if (amount !== undefined) params.set("amount", String(amount));
   if (status) params.set("status", status);
-  return request<{ items: DailyLotteryCode[] }>(`/point-center/daily-lottery/codes?${params.toString()}`);
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  return request<InventoryPage<DailyLotteryCode>>(`/point-center/daily-lottery/codes?${params.toString()}`);
+}
+
+export function batchUpdateDailyLotteryCodes(payload: { chat_id: ChatID; ids: string[]; redeem_url?: string; batch_name?: string; expires_at?: string }): Promise<InventoryBatchResult> {
+  return request<InventoryBatchResult>("/point-center/daily-lottery/codes/batch", { method: "PATCH", body: payload });
+}
+
+export function batchDeleteDailyLotteryCodes(payload: { chat_id: ChatID; ids: string[] }): Promise<InventoryBatchResult> {
+  return request<InventoryBatchResult>("/point-center/daily-lottery/codes/batch", { method: "DELETE", body: payload });
 }
 
 export function fetchDailyLotteryCodeSummary(chatId: ChatID): Promise<{ items: DailyLotteryCodeSummary[] }> {

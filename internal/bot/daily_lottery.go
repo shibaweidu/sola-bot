@@ -114,11 +114,11 @@ func (a *App) showDailyLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat api.
 		fmt.Sprintf("免费剩余次数：%d", status.Remaining),
 	}
 	if status.PaidEnabled {
-		lines = append(lines, fmt.Sprintf("积分抽奖：已抽 %d 次，每次 %d 积分", status.PaidAttempts, status.PaidCostPoints))
+		lines = append(lines, fmt.Sprintf("积分抽奖：已开启（免费次数用完后，每次扣除 %d 积分，已抽 %d 次）", status.PaidCostPoints, status.PaidAttempts))
 	} else {
 		lines = append(lines, "积分抽奖：未开启")
 	}
-	lines = append(lines, "", "当前奖池：")
+	lines = append(lines, "", "抽奖结果为随机结果，以实际发放结果为准。")
 	prizeCount := 0
 	availableCount := 0
 	for _, prize := range status.Prizes {
@@ -129,7 +129,6 @@ func (a *App) showDailyLotteryCenter(b *gotgbot.Bot, ctx *ext.Context, chat api.
 		if prize.AvailableCode > 0 {
 			availableCount += prize.AvailableCode
 		}
-		lines = append(lines, fmt.Sprintf("%d 额度 · 权重 %d/1000 · 可用 %d", prize.Amount, prize.Weight, prize.AvailableCode))
 	}
 	if !status.Enabled {
 		lines = append(lines, "", "每日额度抽奖尚未开启，请联系管理员。")
@@ -155,7 +154,7 @@ func (a *App) showDailyLotteryHistory(b *gotgbot.Bot, ctx *ext.Context, chatID i
 		for _, item := range items {
 			result := "未中奖"
 			if item.Result == "won" {
-				result = fmt.Sprintf("中奖 %d 额度", item.Amount)
+				result = "已中奖"
 			}
 			lines = append(lines, fmt.Sprintf("%s 第%d次：%s", item.DrawDate, item.AttemptNo, result))
 		}
@@ -177,7 +176,7 @@ func formatDailyLotteryResult(result DailyLotteryDrawResult) string {
 	}
 	lines := []string{
 		"🎉 恭喜你中奖！",
-		fmt.Sprintf("本次获得：%d 额度", result.Amount),
+		"兑换码已发放，请复制下方兑换码。",
 		costText,
 	}
 	if result.RedeemURL != "" {

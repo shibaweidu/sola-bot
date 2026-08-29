@@ -117,13 +117,14 @@ func (s *Server) ListDailyLotteryCodes(c *gin.Context) {
 		}
 		amount = &value
 	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	items, err := s.deps.DailyLottery.ListCodes(c.Request.Context(), chatID, amount, strings.TrimSpace(c.Query("status")), limit)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	result, err := s.deps.DailyLottery.ListCodesPage(c.Request.Context(), chatID, amount, strings.TrimSpace(c.Query("status")), page, pageSize)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) SummarizeDailyLotteryCodes(c *gin.Context) {
@@ -186,4 +187,46 @@ func (s *Server) ResetDailyLotteryAttempts(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) BatchUpdateDailyLotteryCodes(c *gin.Context) {
+	if s.deps.DailyLottery == nil {
+		writeError(c, http.StatusInternalServerError, "daily lottery service is not configured")
+		return
+	}
+	var req DailyLotteryCodeBatchUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.ensureChatAllowed(c, req.ChatID) {
+		return
+	}
+	result, err := s.deps.DailyLottery.BatchUpdateCodes(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) BatchDeleteDailyLotteryCodes(c *gin.Context) {
+	if s.deps.DailyLottery == nil {
+		writeError(c, http.StatusInternalServerError, "daily lottery service is not configured")
+		return
+	}
+	var req DailyLotteryCodeBatchDeleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.ensureChatAllowed(c, req.ChatID) {
+		return
+	}
+	result, err := s.deps.DailyLottery.BatchDeleteCodes(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

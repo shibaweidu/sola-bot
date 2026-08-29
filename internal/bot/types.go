@@ -364,8 +364,11 @@ type DailyLotteryService interface {
 	Draw(ctx context.Context, chatID, userID int64) (DailyLotteryDrawResult, error)
 	History(ctx context.Context, chatID, userID int64, limit int) ([]DailyLotteryAttemptRecord, error)
 	ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]DailyLotteryCode, error)
+	ListCodesPage(ctx context.Context, chatID int64, amount *int, status string, page, pageSize int) (DailyLotteryCodePage, error)
 	SummarizeCodes(ctx context.Context, chatID int64) ([]DailyLotteryCodeSummary, error)
 	ImportCodes(ctx context.Context, req DailyLotteryCodeImportRequest) (DailyLotteryCodeImportResult, error)
+	BatchUpdateCodes(ctx context.Context, req DailyLotteryCodeBatchUpdateRequest) (InventoryBatchResult, error)
+	BatchDeleteCodes(ctx context.Context, req DailyLotteryCodeBatchDeleteRequest) (InventoryBatchResult, error)
 	ResetAttempts(ctx context.Context, chatID, userID int64) error
 }
 
@@ -380,6 +383,32 @@ type DailyLotteryCode struct {
 	Status       string
 	AssignedUser int64
 	AssignedAt   *time.Time
+}
+
+type DailyLotteryCodePage struct {
+	Items    []DailyLotteryCode
+	Total    int64
+	Page     int
+	PageSize int
+}
+
+type InventoryBatchResult struct {
+	Updated int
+	Deleted int
+	Skipped int
+}
+
+type DailyLotteryCodeBatchUpdateRequest struct {
+	ChatID    int64
+	IDs       []string
+	RedeemURL *string
+	BatchName *string
+	ExpiresAt *string
+}
+
+type DailyLotteryCodeBatchDeleteRequest struct {
+	ChatID int64
+	IDs    []string
 }
 
 type DailyLotteryCodeSummary struct {

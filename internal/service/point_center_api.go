@@ -34,32 +34,49 @@ func (s *pointCenterAPIService) ResetReferralForTesting(ctx context.Context, cha
 }
 
 func (s *pointCenterAPIService) ListExchangeCodes(ctx context.Context, query api.ExchangeCodeListQuery) ([]api.ExchangeCode, error) {
+	if query.PageSize == 0 && query.Limit > 0 {
+		query.PageSize = query.Limit
+	}
+	page, err := s.ListExchangeCodesPage(ctx, query)
+	return page.Items, err
+}
+
+func (s *pointCenterAPIService) ListExchangeCodesPage(ctx context.Context, query api.ExchangeCodeListQuery) (api.ExchangeCodePage, error) {
 	if s.service == nil || s.service.store == nil || s.service.store.DB == nil {
-		return []api.ExchangeCode{}, nil
+		return api.ExchangeCodePage{Items: []api.ExchangeCode{}, Page: 1, PageSize: 20}, nil
 	}
-	limit := query.Limit
-	if limit <= 0 {
-		limit = 100
+	page := query.Page
+	if page <= 0 {
+		page = 1
 	}
-	if limit > 500 {
-		limit = 500
+	pageSize := query.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
 	}
-	db := s.service.store.DB.WithContext(ctx).Model(&model.ExchangeCode{}).Order("created_at DESC").Limit(limit)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	db := s.service.store.DB.WithContext(ctx).Model(&model.ExchangeCode{})
 	if strings.TrimSpace(query.Status) != "" {
 		db = db.Where("status = ?", strings.TrimSpace(query.Status))
 	}
 	if query.Amount != nil {
 		db = db.Where("amount = ?", *query.Amount)
 	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return api.ExchangeCodePage{}, err
+	}
+	db = db.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize)
 	var rows []model.ExchangeCode
 	if err := db.Find(&rows).Error; err != nil {
-		return nil, err
+		return api.ExchangeCodePage{}, err
 	}
 	out := make([]api.ExchangeCode, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, exchangeCodeToAPI(row))
 	}
-	return out, nil
+	return api.ExchangeCodePage{Items: out, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (s *pointCenterAPIService) SummarizeExchangeCodes(ctx context.Context) ([]api.ExchangeCodeSummary, error) {
@@ -137,6 +154,100 @@ func (s *pointCenterAPIService) ImportExchangeCodes(ctx context.Context, req api
 		return nil
 	})
 	return result, err
+}
+
+func (s *pointCenterAPIService) BatchUpdateExchangeCodes(ctx context.Context, req api.ExchangeCodeBatchUpdateRequest) (api.InventoryBatchResult, error) {
+	ids, err := parseInventoryIDs(req.IDs)
+	if err != nil {
+		return api.InventoryBatchResult{}, err
+	}
+	updates, err := inventoryUpdates(req.RedeemURL, req.BatchName, req.ExpiresAt)
+	if err != nil {
+		return api.InventoryBatchResult{}, err
+	}
+	if len(updates) == 0 {
+		return api.InventoryBatchResult{}, errors.New("至少提供一个要修改的字段")
+	}
+	result := api.InventoryBatchResult{Skipped: len(ids)}
+	err = s.service.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.ExchangeCode{}).Where("id IN ? AND status = ?", ids, "available").Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		result.Updated = int(res.RowsAffected)
+		result.Skipped = len(ids) - result.Updated
+		return nil
+	})
+	return result, err
+}
+
+func (s *pointCenterAPIService) BatchDeleteExchangeCodes(ctx context.Context, req api.ExchangeCodeBatchDeleteRequest) (api.InventoryBatchResult, error) {
+	ids, err := parseInventoryIDs(req.IDs)
+	if err != nil {
+		return api.InventoryBatchResult{}, err
+	}
+	result := api.InventoryBatchResult{Skipped: len(ids)}
+	err = s.service.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("id IN ? AND status = ?", ids, "available").Delete(&model.ExchangeCode{})
+		if res.Error != nil {
+			return res.Error
+		}
+		result.Deleted = int(res.RowsAffected)
+		result.Skipped = len(ids) - result.Deleted
+		return nil
+	})
+	return result, err
+}
+
+func parseInventoryIDs(raw []string) ([]uuid.UUID, error) {
+	if len(raw) == 0 || len(raw) > 500 {
+		return nil, errors.New("兑换码数量必须在 1 到 500 之间")
+	}
+	seen := make(map[uuid.UUID]struct{}, len(raw))
+	ids := make([]uuid.UUID, 0, len(raw))
+	for _, value := range raw {
+		id, err := uuid.Parse(strings.TrimSpace(value))
+		if err != nil {
+			return nil, errors.New("存在无效的兑换码 ID")
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func inventoryUpdates(redeemURL, batchName, expiresAt *string) (map[string]any, error) {
+	updates := make(map[string]any)
+	if redeemURL != nil {
+		value := strings.TrimSpace(*redeemURL)
+		if value != "" && !validHTTPSURL(value) {
+			return nil, errors.New("兑换地址必须使用 https")
+		}
+		updates["redeem_url"] = value
+	}
+	if batchName != nil {
+		value := strings.TrimSpace(*batchName)
+		if len([]rune(value)) > 128 {
+			return nil, errors.New("批次名称不能超过 128 个字符")
+		}
+		updates["batch_name"] = value
+	}
+	if expiresAt != nil {
+		value := strings.TrimSpace(*expiresAt)
+		if value == "" {
+			updates["expires_at"] = nil
+		} else {
+			parsed, err := time.Parse(time.RFC3339, value)
+			if err != nil {
+				return nil, errors.New("有效期必须使用 RFC3339 时间格式")
+			}
+			updates["expires_at"] = parsed
+		}
+	}
+	return updates, nil
 }
 
 func botPointCenterFromAPI(input api.PointCenterConfig) bot.PointCenterConfig {

@@ -127,6 +127,28 @@ func TestDailyLotteryPaidDrawAndReset(t *testing.T) {
 	}
 }
 
+func TestDailyLotterySyncsNewInventoryAmounts(t *testing.T) {
+	ctx := context.Background()
+	st := newServiceTestStore(t)
+	createPointTables(t, st.DB)
+	createPointCenterTables(t, st.DB)
+	createDailyLotteryTables(t, st.DB)
+	svc := NewDailyLotteryService(st)
+	now := time.Now()
+	if err := st.DB.Create(&model.DailyLotteryCode{ID: uuid.New(), ChatID: 1001, Code: "NEW-1", Amount: 1, Status: "available", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	prizes, err := svc.ListPrizes(ctx, 1001)
+	if err != nil || len(prizes) != 1 || prizes[0].Amount != 1 || prizes[0].AvailableCode != 1 {
+		t.Fatalf("synced prizes = %+v, err=%v", prizes, err)
+	}
+	// A depleted/configured amount remains editable and does not block saving
+	// another amount that currently has inventory.
+	if _, err := svc.ReplacePrizes(ctx, 1001, []bot.DailyLotteryPrize{{Amount: 10, Weight: 200, Enabled: true}, {Amount: 1, Weight: 800, Enabled: true}}); err != nil {
+		t.Fatalf("replace prizes with depleted amount: %v", err)
+	}
+}
+
 func createDailyLotteryTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	execSQL(t, db,

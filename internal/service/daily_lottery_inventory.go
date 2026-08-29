@@ -16,37 +16,53 @@ import (
 )
 
 func (s *DailyLotteryService) ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]bot.DailyLotteryCode, error) {
+	page, err := s.ListCodesPage(ctx, chatID, amount, status, 1, limit)
+	return page.Items, err
+}
+
+func (s *DailyLotteryService) ListCodesPage(ctx context.Context, chatID int64, amount *int, status string, page, pageSize int) (bot.DailyLotteryCodePage, error) {
 	if s == nil || s.store == nil || s.store.DB == nil {
-		return []bot.DailyLotteryCode{}, nil
+		return bot.DailyLotteryCodePage{Items: []bot.DailyLotteryCode{}, Page: 1, PageSize: 20}, nil
 	}
 	if chatID == 0 {
-		return nil, errors.New("chat_id is required")
+		return bot.DailyLotteryCodePage{}, errors.New("chat_id is required")
 	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	if page <= 0 {
+		page = 1
 	}
-	query := s.store.DB.WithContext(ctx).Where("chat_id = ?", chatID).Order("created_at DESC").Limit(limit)
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	query := s.store.DB.WithContext(ctx).Model(&model.DailyLotteryCode{}).Where("chat_id = ?", chatID)
 	if amount != nil {
 		if *amount <= 0 {
-			return nil, errors.New("额度必须大于 0")
+			return bot.DailyLotteryCodePage{}, errors.New("额度必须大于 0")
 		}
 		query = query.Where("amount = ?", *amount)
 	}
 	if status != "" {
 		if status != "available" && status != "assigned" && status != "used" {
-			return nil, errors.New("无效库存状态")
+			return bot.DailyLotteryCodePage{}, errors.New("无效库存状态")
 		}
 		query = query.Where("status = ?", status)
 	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return bot.DailyLotteryCodePage{}, err
+	}
+	query = query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize)
 	var rows []model.DailyLotteryCode
 	if err := query.Find(&rows).Error; err != nil {
-		return nil, err
+		return bot.DailyLotteryCodePage{}, err
 	}
 	items := make([]bot.DailyLotteryCode, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, dailyLotteryCodeToBot(row))
 	}
-	return items, nil
+	return bot.DailyLotteryCodePage{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (s *DailyLotteryService) SummarizeCodes(ctx context.Context, chatID int64) ([]bot.DailyLotteryCodeSummary, error) {
@@ -157,6 +173,55 @@ func (s *DailyLotteryService) ImportCodes(ctx context.Context, req bot.DailyLott
 		return bot.DailyLotteryCodeImportResult{}, fmt.Errorf("导入抽奖兑换码失败: %w", err)
 	}
 	return result, nil
+}
+
+func (s *DailyLotteryService) BatchUpdateCodes(ctx context.Context, req bot.DailyLotteryCodeBatchUpdateRequest) (bot.InventoryBatchResult, error) {
+	if req.ChatID == 0 {
+		return bot.InventoryBatchResult{}, errors.New("chat_id is required")
+	}
+	ids, err := parseInventoryIDs(req.IDs)
+	if err != nil {
+		return bot.InventoryBatchResult{}, err
+	}
+	updates, err := inventoryUpdates(req.RedeemURL, req.BatchName, req.ExpiresAt)
+	if err != nil {
+		return bot.InventoryBatchResult{}, err
+	}
+	if len(updates) == 0 {
+		return bot.InventoryBatchResult{}, errors.New("至少提供一个要修改的字段")
+	}
+	result := bot.InventoryBatchResult{Skipped: len(ids)}
+	err = s.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.DailyLotteryCode{}).Where("id IN ? AND chat_id = ? AND status = ?", ids, req.ChatID, "available").Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		result.Updated = int(res.RowsAffected)
+		result.Skipped = len(ids) - result.Updated
+		return nil
+	})
+	return result, err
+}
+
+func (s *DailyLotteryService) BatchDeleteCodes(ctx context.Context, req bot.DailyLotteryCodeBatchDeleteRequest) (bot.InventoryBatchResult, error) {
+	if req.ChatID == 0 {
+		return bot.InventoryBatchResult{}, errors.New("chat_id is required")
+	}
+	ids, err := parseInventoryIDs(req.IDs)
+	if err != nil {
+		return bot.InventoryBatchResult{}, err
+	}
+	result := bot.InventoryBatchResult{Skipped: len(ids)}
+	err = s.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("id IN ? AND chat_id = ? AND status = ?", ids, req.ChatID, "available").Delete(&model.DailyLotteryCode{})
+		if res.Error != nil {
+			return res.Error
+		}
+		result.Deleted = int(res.RowsAffected)
+		result.Skipped = len(ids) - result.Deleted
+		return nil
+	})
+	return result, err
 }
 
 func dailyLotteryCodeToBot(row model.DailyLotteryCode) bot.DailyLotteryCode {

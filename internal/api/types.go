@@ -878,8 +878,11 @@ type PointCenterService interface {
 	UpdateConfig(ctx context.Context, config PointCenterConfig) (PointCenterConfig, error)
 	ResetReferralForTesting(ctx context.Context, chatID, userID int64) error
 	ListExchangeCodes(ctx context.Context, query ExchangeCodeListQuery) ([]ExchangeCode, error)
+	ListExchangeCodesPage(ctx context.Context, query ExchangeCodeListQuery) (ExchangeCodePage, error)
 	SummarizeExchangeCodes(ctx context.Context) ([]ExchangeCodeSummary, error)
 	ImportExchangeCodes(ctx context.Context, req ExchangeCodeImportRequest) (ExchangeCodeImportResult, error)
+	BatchUpdateExchangeCodes(ctx context.Context, req ExchangeCodeBatchUpdateRequest) (InventoryBatchResult, error)
+	BatchDeleteExchangeCodes(ctx context.Context, req ExchangeCodeBatchDeleteRequest) (InventoryBatchResult, error)
 }
 
 type DailyLotteryConfig struct {
@@ -921,8 +924,11 @@ type DailyLotteryAdminService interface {
 	ListPrizes(ctx context.Context, chatID int64) ([]DailyLotteryPrize, error)
 	ReplacePrizes(ctx context.Context, chatID int64, prizes []DailyLotteryPrizeInput) ([]DailyLotteryPrize, error)
 	ListCodes(ctx context.Context, chatID int64, amount *int, status string, limit int) ([]DailyLotteryCode, error)
+	ListCodesPage(ctx context.Context, chatID int64, amount *int, status string, page, pageSize int) (DailyLotteryCodePage, error)
 	SummarizeCodes(ctx context.Context, chatID int64) ([]DailyLotteryCodeSummary, error)
 	ImportCodes(ctx context.Context, req DailyLotteryCodeImportRequest) (DailyLotteryCodeImportResult, error)
+	BatchUpdateCodes(ctx context.Context, req DailyLotteryCodeBatchUpdateRequest) (InventoryBatchResult, error)
+	BatchDeleteCodes(ctx context.Context, req DailyLotteryCodeBatchDeleteRequest) (InventoryBatchResult, error)
 	ResetAttempts(ctx context.Context, chatID, userID int64) error
 }
 
@@ -942,6 +948,50 @@ type DailyLotteryCode struct {
 	Status       string     `json:"status"`
 	AssignedUser int64      `json:"assigned_user"`
 	AssignedAt   *time.Time `json:"assigned_at,omitempty"`
+}
+
+type ExchangeCodePage struct {
+	Items    []ExchangeCode `json:"items"`
+	Total    int64          `json:"total"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"page_size"`
+}
+
+type DailyLotteryCodePage struct {
+	Items    []DailyLotteryCode `json:"items"`
+	Total    int64              `json:"total"`
+	Page     int                `json:"page"`
+	PageSize int                `json:"page_size"`
+}
+
+type InventoryBatchResult struct {
+	Updated int `json:"updated"`
+	Deleted int `json:"deleted"`
+	Skipped int `json:"skipped"`
+}
+
+type ExchangeCodeBatchUpdateRequest struct {
+	IDs       []string `json:"ids" binding:"required,min=1,max=500"`
+	RedeemURL *string  `json:"redeem_url"`
+	BatchName *string  `json:"batch_name"`
+	ExpiresAt *string  `json:"expires_at"`
+}
+
+type ExchangeCodeBatchDeleteRequest struct {
+	IDs []string `json:"ids" binding:"required,min=1,max=500"`
+}
+
+type DailyLotteryCodeBatchUpdateRequest struct {
+	ChatID    int64    `json:"chat_id" binding:"required"`
+	IDs       []string `json:"ids" binding:"required,min=1,max=500"`
+	RedeemURL *string  `json:"redeem_url"`
+	BatchName *string  `json:"batch_name"`
+	ExpiresAt *string  `json:"expires_at"`
+}
+
+type DailyLotteryCodeBatchDeleteRequest struct {
+	ChatID int64    `json:"chat_id" binding:"required"`
+	IDs    []string `json:"ids" binding:"required,min=1,max=500"`
 }
 
 type DailyLotteryCodeSummary struct {
@@ -1012,9 +1062,11 @@ type ExchangeCode struct {
 }
 
 type ExchangeCodeListQuery struct {
-	Status string `form:"status"`
-	Amount *int   `form:"amount"`
-	Limit  int    `form:"limit,default=100"`
+	Status   string `form:"status"`
+	Amount   *int   `form:"amount"`
+	Limit    int    `form:"limit,default=100"`
+	Page     int    `form:"page,default=1"`
+	PageSize int    `form:"page_size,default=20"`
 }
 
 type ExchangeCodeSummary struct {
