@@ -13,15 +13,20 @@ func TestBotMenuDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(member) != 9 || member[0].ActionKey != "invite_rewards" || member[6].ActionKey != "rank" || member[7].ActionKey != "daily_lottery" || member[8].ActionKey != "hide_keyboard" {
+	if len(member) != 8 || member[0].ActionKey != "invite_rewards" || member[6].ActionKey != "rank" || member[7].ActionKey != "daily_lottery" {
 		t.Fatalf("unexpected member defaults: %#v", member)
 	}
 	admin, err := service.List(context.Background(), model.BotMenuRoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(admin) != 13 || admin[7].ActionKey != "daily_lottery" || admin[8].ActionKey != "hide_keyboard" || admin[9].ActionKey != "private_console" {
+	if len(admin) != 12 || admin[7].ActionKey != "daily_lottery" || admin[8].ActionKey != "private_console" {
 		t.Fatalf("unexpected admin defaults: %#v", admin)
+	}
+	for _, item := range append(member, admin...) {
+		if item.ActionKey == "hide_keyboard" {
+			t.Fatal("default menus must not include hide_keyboard")
+		}
 	}
 }
 

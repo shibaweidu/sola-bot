@@ -273,7 +273,8 @@ func (a *App) privateKeyboardOpts(ctx *ext.Context, role string) (*gotgbot.SendM
 	return &gotgbot.SendMessageOpts{ReplyMarkup: gotgbot.ReplyKeyboardMarkup{
 		Keyboard:              rows,
 		ResizeKeyboard:        true,
-		IsPersistent:          true,
+		IsPersistent:          false,
+		OneTimeKeyboard:       false,
 		InputFieldPlaceholder: "请选择功能",
 	}}, nil
 }

@@ -81,10 +81,6 @@ func (s *BotMenuService) List(ctx context.Context, role string) ([]model.BotMenu
 	if err != nil {
 		return nil, err
 	}
-	items, err = s.ensureHideKeyboardItem(ctx, items, role)
-	if err != nil {
-		return nil, err
-	}
 	return items, nil
 }
 
@@ -92,10 +88,6 @@ func (s *BotMenuService) List(ctx context.Context, role string) ([]model.BotMenu
 // was introduced compatible without overwriting existing customizations.
 func (s *BotMenuService) ensureDailyLotteryItem(ctx context.Context, items []model.BotMenuItem, role string) ([]model.BotMenuItem, error) {
 	return s.ensureBuiltinItem(ctx, items, role, "daily_lottery", "🎲 每日额度抽奖", "🎲")
-}
-
-func (s *BotMenuService) ensureHideKeyboardItem(ctx context.Context, items []model.BotMenuItem, role string) ([]model.BotMenuItem, error) {
-	return s.ensureBuiltinItem(ctx, items, role, "hide_keyboard", "⌨️ 收起菜单", "⌨️")
 }
 
 func (s *BotMenuService) ensureBuiltinItem(ctx context.Context, items []model.BotMenuItem, role, actionKey, defaultLabel, icon string) ([]model.BotMenuItem, error) {
@@ -298,7 +290,6 @@ func defaultBotMenu(role string) []model.BotMenuItem {
 		{Role: role, Label: "🏪 小铺地址", Icon: "🏪", ActionType: model.BotMenuActionBuiltin, ActionKey: "shop", RowIndex: 2, ColumnIndex: 1, Enabled: true},
 		{Role: role, Label: "🏆 积分榜", Icon: "🏆", ActionType: model.BotMenuActionBuiltin, ActionKey: "rank", RowIndex: 3, ColumnIndex: 0, Enabled: true},
 		{Role: role, Label: "🎲 每日额度抽奖", Icon: "🎲", ActionType: model.BotMenuActionBuiltin, ActionKey: "daily_lottery", RowIndex: 3, ColumnIndex: 1, Enabled: true},
-		{Role: role, Label: "⌨️ 收起菜单", Icon: "⌨️", ActionType: model.BotMenuActionBuiltin, ActionKey: "hide_keyboard", RowIndex: 4, ColumnIndex: 0, Enabled: true},
 	}
 	if role != model.BotMenuRoleAdmin {
 		return items

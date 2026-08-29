@@ -1,0 +1,2 @@
+-- This migration intentionally does not re-enable legacy hide_keyboard rows.
+-- Their previous enabled state is not recoverable without overwriting user changes.

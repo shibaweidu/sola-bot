@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader eyebrow="机器人运营" title="机器人菜单" description="配置私聊持久键盘。菜单按机器人全局生效，群组内仍使用原有按钮和命令。">
+    <PageHeader eyebrow="机器人运营" title="机器人菜单" description="配置私聊键盘。菜单按机器人全局生效，收起和展开由 Telegram 输入框右侧的原生键盘图标控制。">
       <template #actions>
         <el-radio-group v-model="role" @change="loadMenu">
           <el-radio-button value="member">普通用户菜单</el-radio-button>
