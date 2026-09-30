@@ -40,6 +40,18 @@ export interface DailyLotteryCodeSummary {
   total: number;
 }
 
+export interface DailyLotteryAttempt {
+  id: number;
+  chat_id: ChatID;
+  user_id: ChatID;
+  draw_date: string;
+  attempt_no: number;
+  result: "won" | "lost";
+  amount: number;
+  cost_points: number;
+  created_at: string;
+}
+
 export function fetchDailyLotteryConfig(chatId: ChatID): Promise<DailyLotteryConfig> {
   return request<DailyLotteryConfig>(`/point-center/daily-lottery/config?chat_id=${encodeURIComponent(String(chatId))}`);
 }
@@ -96,4 +108,11 @@ export function importDailyLotteryCodes(payload: {
 
 export function resetDailyLotteryAttempts(payload: { chat_id: ChatID; user_id: number }): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>("/point-center/daily-lottery/reset", { method: "POST", body: payload });
+}
+
+export function fetchDailyLotteryAttempts(chatId: ChatID, userId?: number, drawDate?: string, limit = 100): Promise<{ items: DailyLotteryAttempt[] }> {
+  const params = new URLSearchParams({ chat_id: String(chatId), limit: String(limit) });
+  if (userId) params.set("user_id", String(userId));
+  if (drawDate) params.set("draw_date", drawDate);
+  return request<{ items: DailyLotteryAttempt[] }>(`/point-center/daily-lottery/attempts?${params.toString()}`);
 }

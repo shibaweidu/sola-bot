@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,18 +25,16 @@ import (
 )
 
 type Runner struct {
-	cfg              config.Config
-	log              *zap.Logger
-	store            *store.Store
-	sched            gocron.Scheduler
-	tgBot            *gotgbot.Bot
-	mu               sync.Mutex
-	muPost           sync.Mutex // separate mutex for postFailureCount to avoid deadlock when called from within r.mu
-	postFailureCount map[uint64]int
+	cfg   config.Config
+	log   *zap.Logger
+	store *store.Store
+	sched gocron.Scheduler
+	tgBot *gotgbot.Bot
+	mu    sync.Mutex
 }
 
 func New(cfg config.Config, st *store.Store, log *zap.Logger) *Runner {
-	return &Runner{cfg: cfg, store: st, log: log, postFailureCount: make(map[uint64]int)}
+	return &Runner{cfg: cfg, store: st, log: log}
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -134,18 +135,19 @@ func (r *Runner) runScheduledPost(postID uint64) {
 		return
 	}
 	if err := r.sendScheduledPost(context.Background(), post); err != nil {
-		failures := r.incrementScheduledPostFailure(post.ID)
-		r.log.Error("send scheduled post", zap.Uint64("post_id", post.ID), zap.Int64("chat_id", post.ChatID), zap.Int("consecutive_failures", failures), zap.Error(err))
-		if failures >= 5 {
+		if scheduledPostPermanentError(err) {
 			if disableErr := r.disableScheduledPost(post.ID, err.Error()); disableErr != nil {
-				r.log.Error("disable scheduled post after repeated failures", zap.Uint64("post_id", post.ID), zap.Error(disableErr))
+				r.log.Error("disable scheduled post after permanent failure", zap.Uint64("post_id", post.ID), zap.Error(disableErr))
 			} else {
-				r.log.Warn("scheduled post disabled after repeated failures", zap.Uint64("post_id", post.ID), zap.Int64("chat_id", post.ChatID), zap.Int("consecutive_failures", failures))
+				r.log.Warn("scheduled post disabled after permanent failure", zap.Uint64("post_id", post.ID), zap.Int64("chat_id", post.ChatID), zap.Error(err))
 			}
+		} else {
+			// Network failures and Telegram outages are temporary. Leave the task
+			// enabled so the next scheduled run recovers automatically.
+			r.log.Warn("send scheduled post failed; keeping task enabled for retry", zap.Uint64("post_id", post.ID), zap.Int64("chat_id", post.ChatID), zap.Error(err))
 		}
 		return
 	}
-	r.resetScheduledPostFailure(post.ID)
 	now := time.Now()
 	updates := map[string]any{"last_run_at": now}
 	if strings.TrimSpace(post.CronExpr) == "" {
@@ -156,21 +158,7 @@ func (r *Runner) runScheduledPost(postID uint64) {
 	}
 }
 
-func (r *Runner) incrementScheduledPostFailure(postID uint64) int {
-	r.muPost.Lock()
-	defer r.muPost.Unlock()
-	r.postFailureCount[postID]++
-	return r.postFailureCount[postID]
-}
-
-func (r *Runner) resetScheduledPostFailure(postID uint64) {
-	r.muPost.Lock()
-	defer r.muPost.Unlock()
-	delete(r.postFailureCount, postID)
-}
-
 func (r *Runner) disableScheduledPost(postID uint64, reason string) error {
-	r.resetScheduledPostFailure(postID)
 	if r.store == nil || r.store.DB == nil {
 		return nil
 	}
@@ -178,6 +166,42 @@ func (r *Runner) disableScheduledPost(postID uint64, reason string) error {
 		"enabled": false,
 	}
 	return r.store.DB.Model(&model.ScheduledPost{}).Where("id = ?", postID).Updates(updates).Error
+}
+
+// scheduledPostPermanentError identifies failures that require an operator to
+// fix the task or the bot's access. Everything else is retried by the schedule.
+func scheduledPostPermanentError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var netErr net.Error
+	var urlErr *url.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) || errors.As(err, &urlErr) {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	permanentMessages := []string{
+		"scheduled post requires media",
+		"scheduled post requires content",
+		"telegram bot is not configured",
+		"chat not found",
+		"bot was kicked",
+		"bot is not a member",
+		"bot was blocked",
+		"not enough rights",
+		"have no rights",
+		"need to be an administrator",
+		"forbidden",
+		"unauthorized",
+	}
+	for _, phrase := range permanentMessages {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runner) scanDueScheduledPosts(ctx context.Context, now time.Time) {
@@ -256,7 +280,7 @@ func (r *Runner) sendScheduledPost(ctx context.Context, post model.ScheduledPost
 	}
 	hasInlineMedia := len(post.MediaData) > 0
 
-	keyboard, err := parseInlineKeyboard(post.InlineKeyboardJSON)
+	keyboard, err := parseInlineKeyboard(post.InlineKeyboardJSON, r.tgBot.User.Username, post.ChatID)
 	if err != nil {
 		r.log.Warn("scheduled post has invalid inline keyboard", zap.Uint64("post_id", post.ID), zap.Error(err))
 	}
@@ -604,12 +628,13 @@ type inlineKeyboardButton struct {
 	Text         string `json:"text"`
 	URL          string `json:"url,omitempty"`
 	CallbackData string `json:"callback_data,omitempty"`
+	Action       string `json:"action,omitempty"`
 }
 
 // parseInlineKeyboard unmarshals a JSON inline keyboard definition
 // and returns a gotgbot.InlineKeyboardMarkup suitable for ReplyMarkup.
 // Returns nil when the input is empty or "[]".
-func parseInlineKeyboard(raw string) (*gotgbot.InlineKeyboardMarkup, error) {
+func parseInlineKeyboard(raw string, botUsername string, chatID int64) (*gotgbot.InlineKeyboardMarkup, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "[]" || raw == "null" {
 		return nil, nil
@@ -625,13 +650,39 @@ func parseInlineKeyboard(raw string) (*gotgbot.InlineKeyboardMarkup, error) {
 	for _, row := range rows {
 		buttons := make([]gotgbot.InlineKeyboardButton, 0, len(row))
 		for _, btn := range row {
+			buttonURL := strings.TrimSpace(btn.URL)
+			if strings.TrimSpace(btn.Action) != "" {
+				buttonURL = scheduledPostActionURL(botUsername, btn.Action, chatID)
+				if buttonURL == "" {
+					return nil, fmt.Errorf("unsupported inline keyboard action %q", btn.Action)
+				}
+			}
 			buttons = append(buttons, gotgbot.InlineKeyboardButton{
 				Text:         btn.Text,
-				Url:          btn.URL,
+				Url:          buttonURL,
 				CallbackData: btn.CallbackData,
 			})
 		}
 		keyboard = append(keyboard, buttons)
 	}
 	return &gotgbot.InlineKeyboardMarkup{InlineKeyboard: keyboard}, nil
+}
+
+func scheduledPostActionURL(botUsername, action string, chatID int64) string {
+	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
+	if username == "" || chatID == 0 {
+		return ""
+	}
+	if action == "daily_lottery" {
+		return fmt.Sprintf("https://t.me/%s?start=dl_%d", username, chatID)
+	}
+	codes := map[string]string{
+		"sign": "s", "invite_rewards": "i", "points": "p",
+		"rank": "r", "exchange": "e",
+	}
+	code, ok := codes[action]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("https://t.me/%s?start=pa_%s_%d", username, code, chatID)
 }

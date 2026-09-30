@@ -50,6 +50,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			compatSecured.GET("/auth/me", server.Me)
 			compatSecured.GET("/dashboard/summary", server.DashboardSummary)
 			compatSecured.GET("/bots", server.ListBots)
+			compatSecured.GET("/bot/config", server.GetBotConfig)
+			compatSecured.PUT("/bot/config", server.UpdateBotConfig)
 			compatSecured.GET("/bot-menu", server.ListBotMenu)
 			compatSecured.PUT("/bot-menu", server.ReplaceBotMenu)
 			compatSecured.POST("/bot-menu/reset", server.ResetBotMenu)
@@ -57,6 +59,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			compatSecured.GET("/users/export", server.ExportUsers)
 			compatSecured.POST("/users/batch", server.BatchUsers)
 			compatSecured.GET("/chats", server.ListChats)
+			compatSecured.POST("/chats/bind", server.BindChat)
+			compatSecured.DELETE("/chats/:chat_id/bind", server.UnbindChat)
 			compatSecured.GET("/chats/:chat_id/points-config", server.GetChatPointConfig)
 			compatSecured.PUT("/chats/:chat_id/points-config", server.UpdateChatPointConfig)
 			compatSecured.GET("/points/config/:chatID", server.GetPointConfig)
@@ -133,6 +137,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 			compatSecured.PATCH("/point-center/daily-lottery/codes/batch", server.BatchUpdateDailyLotteryCodes)
 			compatSecured.DELETE("/point-center/daily-lottery/codes/batch", server.BatchDeleteDailyLotteryCodes)
 			compatSecured.POST("/point-center/daily-lottery/reset", server.ResetDailyLotteryAttempts)
+			compatSecured.GET("/point-center/daily-lottery/attempts", server.ListDailyLotteryAttempts)
 			compatSecured.GET("/stats/overview", server.StatsOverview)
 			compatSecured.GET("/stats/activity", server.StatsActivity)
 			compatSecured.GET("/stats/points", server.StatsPoints)
@@ -309,6 +314,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 				pointCenter.PATCH("/daily-lottery/codes/batch", server.BatchUpdateDailyLotteryCodes)
 				pointCenter.DELETE("/daily-lottery/codes/batch", server.BatchDeleteDailyLotteryCodes)
 				pointCenter.POST("/daily-lottery/reset", server.ResetDailyLotteryAttempts)
+				pointCenter.GET("/daily-lottery/attempts", server.ListDailyLotteryAttempts)
 			}
 
 			auditLogs := secured.Group("/audit-logs")

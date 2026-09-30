@@ -1181,7 +1181,7 @@ func (s *Server) CreatePost(c *gin.Context) {
 
 	post, err := s.deps.Posts.Create(c.Request.Context(), req)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, err.Error())
+		writeServiceError(c, err)
 		return
 	}
 
@@ -1968,6 +1968,8 @@ func writeError(c *gin.Context, status int, msg string) {
 
 func writeServiceError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, ErrBadRequest):
+		writeError(c, http.StatusBadRequest, strings.TrimPrefix(err.Error(), ErrBadRequest.Error()+": "))
 	case errors.Is(err, ErrForbidden):
 		writeError(c, http.StatusForbidden, "无权访问该资源")
 	case errors.Is(err, gorm.ErrRecordNotFound):

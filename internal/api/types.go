@@ -15,7 +15,10 @@ const (
 	ContextKeyAuthClaims = "auth.claims"
 )
 
-var ErrForbidden = errors.New("forbidden")
+var (
+	ErrForbidden  = errors.New("forbidden")
+	ErrBadRequest = errors.New("bad request")
+)
 
 // JWTConfig controls signing and verification for admin sessions.
 type JWTConfig struct {
@@ -380,70 +383,73 @@ type CommonListQuery struct {
 }
 
 type PostCreateRequest struct {
-	ChatID            int64      `json:"chat_id" binding:"required"`
-	Title             string     `json:"title,omitempty"`
-	Content           string     `json:"content,omitempty"`
-	MediaURL          string     `json:"media_url,omitempty"`
-	MediaName         string     `json:"media_name,omitempty"`
-	MediaMime         string     `json:"media_mime,omitempty"`
-	MediaDataBase64   string     `json:"media_data_base64,omitempty"`
-	MediaType         string     `json:"media_type,omitempty"`
-	CronExpr          string     `json:"cron_expr,omitempty"`
-	RunOnceAt         *time.Time `json:"run_once_at,omitempty"`
-	Enabled           *bool      `json:"enabled,omitempty"`
-	PublishAt         *time.Time `json:"publish_at,omitempty"`
-	Language          string     `json:"language,omitempty"`
-	CreatedBy         string     `json:"created_by,omitempty"`
-	TemplateKey       string     `json:"template_key,omitempty"`
-	ExternalRef       string     `json:"external_ref,omitempty"`
-	PinAfterSend      *bool      `json:"pin_after_send,omitempty"`
-	AutoDeleteSeconds int        `json:"auto_delete_seconds,omitempty" binding:"omitempty,gte=0"`
+	ChatID             int64      `json:"chat_id" binding:"required"`
+	Title              string     `json:"title,omitempty"`
+	Content            string     `json:"content,omitempty"`
+	MediaURL           string     `json:"media_url,omitempty"`
+	MediaName          string     `json:"media_name,omitempty"`
+	MediaMime          string     `json:"media_mime,omitempty"`
+	MediaDataBase64    string     `json:"media_data_base64,omitempty"`
+	MediaType          string     `json:"media_type,omitempty"`
+	CronExpr           string     `json:"cron_expr,omitempty"`
+	RunOnceAt          *time.Time `json:"run_once_at,omitempty"`
+	Enabled            *bool      `json:"enabled,omitempty"`
+	PublishAt          *time.Time `json:"publish_at,omitempty"`
+	Language           string     `json:"language,omitempty"`
+	CreatedBy          string     `json:"created_by,omitempty"`
+	TemplateKey        string     `json:"template_key,omitempty"`
+	ExternalRef        string     `json:"external_ref,omitempty"`
+	PinAfterSend       *bool      `json:"pin_after_send,omitempty"`
+	AutoDeleteSeconds  int        `json:"auto_delete_seconds,omitempty" binding:"omitempty,gte=0"`
+	InlineKeyboardJSON string     `json:"inline_keyboard_json,omitempty"`
 }
 
 type PostUpdateRequest struct {
-	Title             *string    `json:"title,omitempty"`
-	Content           *string    `json:"content,omitempty"`
-	MediaURL          *string    `json:"media_url,omitempty"`
-	MediaName         *string    `json:"media_name,omitempty"`
-	MediaMime         *string    `json:"media_mime,omitempty"`
-	MediaDataBase64   *string    `json:"media_data_base64,omitempty"`
-	ClearInlineMedia  *bool      `json:"clear_inline_media,omitempty"`
-	MediaType         *string    `json:"media_type,omitempty"`
-	CronExpr          *string    `json:"cron_expr,omitempty"`
-	RunOnceAt         *time.Time `json:"run_once_at,omitempty"`
-	Enabled           *bool      `json:"enabled,omitempty"`
-	PublishAt         *time.Time `json:"publish_at,omitempty"`
-	Language          *string    `json:"language,omitempty"`
-	TemplateKey       *string    `json:"template_key,omitempty"`
-	ExternalRef       *string    `json:"external_ref,omitempty"`
-	Status            *string    `json:"status,omitempty"`
-	PinAfterSend      *bool      `json:"pin_after_send,omitempty"`
-	AutoDeleteSeconds *int       `json:"auto_delete_seconds,omitempty" binding:"omitempty,gte=0"`
+	Title              *string    `json:"title,omitempty"`
+	Content            *string    `json:"content,omitempty"`
+	MediaURL           *string    `json:"media_url,omitempty"`
+	MediaName          *string    `json:"media_name,omitempty"`
+	MediaMime          *string    `json:"media_mime,omitempty"`
+	MediaDataBase64    *string    `json:"media_data_base64,omitempty"`
+	ClearInlineMedia   *bool      `json:"clear_inline_media,omitempty"`
+	MediaType          *string    `json:"media_type,omitempty"`
+	CronExpr           *string    `json:"cron_expr,omitempty"`
+	RunOnceAt          *time.Time `json:"run_once_at,omitempty"`
+	Enabled            *bool      `json:"enabled,omitempty"`
+	PublishAt          *time.Time `json:"publish_at,omitempty"`
+	Language           *string    `json:"language,omitempty"`
+	TemplateKey        *string    `json:"template_key,omitempty"`
+	ExternalRef        *string    `json:"external_ref,omitempty"`
+	Status             *string    `json:"status,omitempty"`
+	PinAfterSend       *bool      `json:"pin_after_send,omitempty"`
+	AutoDeleteSeconds  *int       `json:"auto_delete_seconds,omitempty" binding:"omitempty,gte=0"`
+	InlineKeyboardJSON *string    `json:"inline_keyboard_json,omitempty"`
 }
 
 type Post struct {
-	ID                string     `json:"id"`
-	ChatID            int64      `json:"chat_id"`
-	Title             string     `json:"title"`
-	Content           string     `json:"content"`
-	MediaURL          string     `json:"media_url,omitempty"`
-	MediaName         string     `json:"media_name,omitempty"`
-	MediaMime         string     `json:"media_mime,omitempty"`
-	HasInlineMedia    bool       `json:"has_inline_media,omitempty"`
-	MediaType         string     `json:"media_type,omitempty"`
-	CronExpr          string     `json:"cron_expr,omitempty"`
-	RunOnceAt         *time.Time `json:"run_once_at,omitempty"`
-	Enabled           bool       `json:"enabled"`
-	LastRunAt         *time.Time `json:"last_run_at,omitempty"`
-	PublishAt         *time.Time `json:"publish_at,omitempty"`
-	Status            string     `json:"status"`
-	Language          string     `json:"language,omitempty"`
-	TemplateKey       string     `json:"template_key,omitempty"`
-	ExternalRef       string     `json:"external_ref,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	PinAfterSend      bool       `json:"pin_after_send"`
-	AutoDeleteSeconds int        `json:"auto_delete_seconds"`
+	ID                 string     `json:"id"`
+	ChatID             int64      `json:"chat_id"`
+	Title              string     `json:"title"`
+	Content            string     `json:"content"`
+	MediaURL           string     `json:"media_url,omitempty"`
+	MediaName          string     `json:"media_name,omitempty"`
+	MediaMime          string     `json:"media_mime,omitempty"`
+	HasInlineMedia     bool       `json:"has_inline_media,omitempty"`
+	MediaType          string     `json:"media_type,omitempty"`
+	CronExpr           string     `json:"cron_expr,omitempty"`
+	RunOnceAt          *time.Time `json:"run_once_at,omitempty"`
+	Enabled            bool       `json:"enabled"`
+	LastRunAt          *time.Time `json:"last_run_at,omitempty"`
+	PublishAt          *time.Time `json:"publish_at,omitempty"`
+	Status             string     `json:"status"`
+	Language           string     `json:"language,omitempty"`
+	TemplateKey        string     `json:"template_key,omitempty"`
+	ExternalRef        string     `json:"external_ref,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	PinAfterSend       bool       `json:"pin_after_send"`
+	AutoDeleteSeconds  int        `json:"auto_delete_seconds"`
+	InlineKeyboardJSON string     `json:"inline_keyboard_json,omitempty"`
 }
 
 type ScheduleCreateRequest struct {
@@ -930,11 +936,31 @@ type DailyLotteryAdminService interface {
 	BatchUpdateCodes(ctx context.Context, req DailyLotteryCodeBatchUpdateRequest) (InventoryBatchResult, error)
 	BatchDeleteCodes(ctx context.Context, req DailyLotteryCodeBatchDeleteRequest) (InventoryBatchResult, error)
 	ResetAttempts(ctx context.Context, chatID, userID int64) error
+	ListAttempts(ctx context.Context, query DailyLotteryAttemptListQuery) ([]DailyLotteryAttempt, error)
 }
 
 type DailyLotteryResetRequest struct {
 	ChatID int64 `json:"chat_id" binding:"required"`
 	UserID int64 `json:"user_id" binding:"required"`
+}
+
+type DailyLotteryAttemptListQuery struct {
+	ChatID   int64  `form:"chat_id"`
+	UserID   int64  `form:"user_id"`
+	DrawDate string `form:"draw_date"`
+	Limit    int    `form:"limit,default=100" binding:"omitempty,gte=1,lte=500"`
+}
+
+type DailyLotteryAttempt struct {
+	ID         uint64    `json:"id"`
+	ChatID     int64     `json:"chat_id"`
+	UserID     int64     `json:"user_id"`
+	DrawDate   string    `json:"draw_date"`
+	AttemptNo  int       `json:"attempt_no"`
+	Result     string    `json:"result"`
+	Amount     int       `json:"amount"`
+	CostPoints int       `json:"cost_points"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type DailyLotteryCode struct {

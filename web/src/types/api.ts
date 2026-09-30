@@ -287,6 +287,7 @@ export interface ScheduledPostRecord {
   media_mime?: string;
   has_inline_media?: boolean;
   media_type: "text" | "photo" | "video" | "document";
+  inline_keyboard_json?: string;
   cron_expr?: string;
   run_once_at?: string | null;
   enabled: boolean;

@@ -80,6 +80,24 @@
       </el-form>
     </PanelSection>
 
+    <PanelSection title="每日抽奖记录" description="查看群成员每日额度抽奖的每次参与结果；与下方的普通活动抽奖分开统计。">
+      <template #actions>
+        <el-date-picker v-model="dailyAttemptDate" type="date" value-format="YYYY-MM-DD" clearable placeholder="按日期筛选" />
+        <el-button :icon="Refresh" :loading="dailyAttemptsLoading" @click="loadDailyAttempts">刷新记录</el-button>
+      </template>
+      <el-table :data="dailyAttempts" stripe size="small" empty-text="暂无每日抽奖记录">
+        <el-table-column prop="user_id" label="用户 ID" min-width="150" />
+        <el-table-column prop="draw_date" label="日期" width="120" />
+        <el-table-column prop="attempt_no" label="第几次" width="90" />
+        <el-table-column label="结果" width="100">
+          <template #default="{ row }"><el-tag :type="row.result === 'won' ? 'success' : 'info'">{{ row.result === 'won' ? '中奖' : '未中奖' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="额度" width="90"><template #default="{ row }">{{ row.amount > 0 ? `${row.amount} 额度` : '-' }}</template></el-table-column>
+        <el-table-column prop="cost_points" label="消耗积分" width="100" />
+        <el-table-column prop="created_at" label="参与时间" min-width="180" />
+      </el-table>
+    </PanelSection>
+
     <el-drawer v-model="dailyInventoryDrawer" title="每日抽奖库存" size="min(920px, 95vw)" destroy-on-close @closed="selectedDailyCodeIds = []">
       <div class="drawer-toolbar">
         <el-select v-model="dailyInventory.status" clearable placeholder="全部状态" @change="reloadDailyInventoryDrawer">
@@ -301,7 +319,7 @@ import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
 import { cancelLottery, createLottery, fetchLotteries, fetchLotteryEntries, fetchLotteryWinners } from "@/api/lottery";
-import { batchDeleteDailyLotteryCodes, batchUpdateDailyLotteryCodes, fetchDailyLotteryCodeSummary, fetchDailyLotteryCodes, fetchDailyLotteryConfig, fetchDailyLotteryPrizes, importDailyLotteryCodes, resetDailyLotteryAttempts, updateDailyLottery, type DailyLotteryCode, type DailyLotteryCodeSummary, type DailyLotteryPrize } from "@/api/dailyLottery";
+import { batchDeleteDailyLotteryCodes, batchUpdateDailyLotteryCodes, fetchDailyLotteryAttempts, fetchDailyLotteryCodeSummary, fetchDailyLotteryCodes, fetchDailyLotteryConfig, fetchDailyLotteryPrizes, importDailyLotteryCodes, resetDailyLotteryAttempts, updateDailyLottery, type DailyLotteryAttempt, type DailyLotteryCode, type DailyLotteryCodeSummary, type DailyLotteryPrize } from "@/api/dailyLottery";
 import type { ChatID, LotteryEntryRecord, LotteryPayload, LotteryRecord } from "@/types/api";
 import { parseChinaLocalDateTimeToISO } from "@/utils/datetime";
 import { parseNumericId, formatDateTime, errorMessage } from "@/utils/helpers";
@@ -334,6 +352,9 @@ const dailyBatchEditVisible = ref(false);
 const dailyBatchEditing = ref(false);
 const dailyBatchForm = reactive({ edit_redeem_url: false, edit_batch_name: false, edit_expires_at: false, redeem_url: "", batch_name: "", expires_at: "" });
 const dailyResetting = ref(false);
+const dailyAttemptsLoading = ref(false);
+const dailyAttempts = ref<DailyLotteryAttempt[]>([]);
+const dailyAttemptDate = ref("");
 const dailyInventory = reactive({ amount: undefined as number | undefined, amountInput: 10, batchName: "", redeemURL: "", codes: "", status: "" });
 const dailyReset = reactive({ userId: undefined as number | undefined });
 const dailyForm = reactive({ enabled: false, daily_attempts: 3, cost_points: 1, paid_enabled: false, guarantee_on_last: true });
@@ -556,6 +577,7 @@ async function loadDailyLottery(): Promise<void> {
     dailyPrizes.value = [];
     dailyCodes.value = [];
     dailyCodeSummaries.value = [];
+    dailyAttempts.value = [];
     dailyInventoryTotal.value = 0;
     Object.assign(dailyForm, { enabled: false, daily_attempts: 3, cost_points: 1, paid_enabled: false, guarantee_on_last: true });
     return;
@@ -565,11 +587,27 @@ async function loadDailyLottery(): Promise<void> {
     const [config, prizes] = await Promise.all([fetchDailyLotteryConfig(selectedChatId.value), fetchDailyLotteryPrizes(selectedChatId.value)]);
     Object.assign(dailyForm, config);
     dailyPrizes.value = prizes.items;
-    await loadDailyInventory();
+    await Promise.all([loadDailyInventory(), loadDailyAttempts()]);
   } catch (error) {
     ElMessage.error(errorMessage(error));
   } finally {
     dailyLoading.value = false;
+  }
+}
+
+async function loadDailyAttempts(): Promise<void> {
+  if (!selectedChatId.value) {
+    dailyAttempts.value = [];
+    return;
+  }
+  dailyAttemptsLoading.value = true;
+  try {
+    const result = await fetchDailyLotteryAttempts(selectedChatId.value, undefined, dailyAttemptDate.value || undefined);
+    dailyAttempts.value = result.items;
+  } catch (error) {
+    ElMessage.error(errorMessage(error));
+  } finally {
+    dailyAttemptsLoading.value = false;
   }
 }
 
@@ -728,6 +766,7 @@ watch(selectedChatId, () => {
   void loadDailyLottery();
   if (dailyInventoryDrawer.value) void loadDailyInventoryPage();
 });
+watch(dailyAttemptDate, () => { void loadDailyAttempts(); });
 onMounted(() => { void loadLotteries(); void loadDailyLottery(); });
 </script>
 

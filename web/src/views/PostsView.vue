@@ -152,6 +152,39 @@
             @update:media-file="handleMediaFileUpdate"
           />
         </el-form-item>
+        <el-form-item label="消息末尾按钮">
+          <div class="inline-keyboard-editor">
+            <div class="inline-keyboard-toolbar">
+              <el-select v-model="inlineColumns" class="inline-columns" aria-label="每行按钮数">
+                <el-option v-for="count in 4" :key="count" :label="`每行 ${count} 个`" :value="count" />
+              </el-select>
+              <el-button :icon="Plus" :disabled="inlineButtons.length >= 10" @click="addInlineButton">添加按钮</el-button>
+            </div>
+            <div v-if="inlineButtons.length === 0" class="inline-keyboard-empty">未配置按钮</div>
+            <div v-for="(button, index) in inlineButtons" :key="button.id" class="inline-button-row">
+              <el-input v-model="button.text" maxlength="64" show-word-limit placeholder="按钮文字" />
+              <el-select v-model="button.type" @change="button.value = button.type === 'url' ? '' : 'sign'">
+                <el-option label="自定义链接" value="url" />
+                <el-option label="内置功能" value="action" />
+              </el-select>
+              <el-input v-if="button.type === 'url'" v-model="button.value" placeholder="https://example.com" />
+              <el-select v-else v-model="button.value">
+                <el-option v-for="option in builtinActionOptions" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+              <div class="inline-button-actions">
+                <el-button circle :icon="ArrowUp" :disabled="index === 0" title="上移" aria-label="上移按钮" @click="moveInlineButton(index, -1)" />
+                <el-button circle :icon="ArrowDown" :disabled="index === inlineButtons.length - 1" title="下移" aria-label="下移按钮" @click="moveInlineButton(index, 1)" />
+                <el-button circle type="danger" :icon="Delete" title="删除" aria-label="删除按钮" @click="removeInlineButton(index)" />
+              </div>
+            </div>
+            <div v-if="inlinePreviewRows.length" class="inline-keyboard-preview" aria-label="Telegram 按钮预览">
+              <div v-for="(row, rowIndex) in inlinePreviewRows" :key="rowIndex" class="inline-preview-row">
+                <span v-for="button in row" :key="button.id">{{ button.text || "未命名按钮" }}</span>
+              </div>
+            </div>
+            <span class="form-hint">最多 10 个按钮；自定义链接仅支持 HTTPS，内置功能会跳转机器人私聊并自动选择当前群。</span>
+          </div>
+        </el-form-item>
         <el-row :gutter="12">
           <el-col v-if="scheduleMode === 'once'" :xs="24" :md="12">
             <el-form-item label="发送时间（北京时间）">
@@ -245,7 +278,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import MediaSourceField, { type InlineMediaFileValue } from "@/components/MediaSourceField.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Refresh } from "@element-plus/icons-vue";
+import { ArrowDown, ArrowUp, Delete, Plus, Refresh } from "@element-plus/icons-vue";
 import ChatSelect from "@/components/ChatSelect.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PanelSection from "@/components/PanelSection.vue";
@@ -277,6 +310,9 @@ const existingInlineMediaName = ref("");
 const existingInlineMediaMime = ref("");
 type ScheduleMode = "once" | "daily" | "hourly" | "weekly" | "monthly" | "seconds" | "minutes" | "custom";
 type ScheduleCheck = { valid: boolean; type: "success" | "warning" | "info" | "error"; title: string };
+type InlineButtonType = "url" | "action";
+type InlineButtonAction = "sign" | "daily_lottery" | "invite_rewards" | "points" | "rank" | "exchange";
+type InlineButtonEditor = { id: number; text: string; type: InlineButtonType; value: string };
 
 const scheduleMode = ref<ScheduleMode>("once");
 const scheduleModeOptions: Array<{ label: string; value: ScheduleMode }> = [
@@ -295,6 +331,17 @@ const weekday = ref(1);
 const monthDay = ref(1);
 const intervalSeconds = ref(30);
 const intervalMinutes = ref(5);
+const inlineColumns = ref(2);
+const inlineButtons = ref<InlineButtonEditor[]>([]);
+let nextInlineButtonID = 1;
+const builtinActionOptions: Array<{ label: string; value: InlineButtonAction }> = [
+  { label: "签到", value: "sign" },
+  { label: "每日抽奖", value: "daily_lottery" },
+  { label: "邀请奖励", value: "invite_rewards" },
+  { label: "积分中心", value: "points" },
+  { label: "排行榜", value: "rank" },
+  { label: "兑换额度", value: "exchange" },
+];
 const form = reactive<ScheduledPostPayload>({
   chat_id: "",
   title: "",
@@ -310,7 +357,10 @@ const form = reactive<ScheduledPostPayload>({
   enabled: true,
   pin_after_send: false,
   auto_delete_seconds: 0,
+  inline_keyboard_json: "[]",
 });
+
+const inlinePreviewRows = computed(() => chunkInlineButtons(inlineButtons.value, inlineColumns.value));
 
 const schedulePreview = computed(() => {
   const fields = scheduleFields(false);
@@ -348,6 +398,90 @@ const bodyPlaceholder = computed(() => (form.media_type === "text" ? "输入要�
 function optionalText(value?: string | null): string | undefined {
   const text = value?.trim();
   return text || undefined;
+}
+
+function chunkInlineButtons(buttons: InlineButtonEditor[], columns: number): InlineButtonEditor[][] {
+  const size = Math.max(1, Math.min(4, Number(columns) || 2));
+  const rows: InlineButtonEditor[][] = [];
+  for (let index = 0; index < buttons.length; index += size) {
+    rows.push(buttons.slice(index, index + size));
+  }
+  return rows;
+}
+
+function addInlineButton(): void {
+  if (inlineButtons.value.length >= 10) return;
+  inlineButtons.value.push({ id: nextInlineButtonID++, text: "", type: "url", value: "" });
+}
+
+function removeInlineButton(index: number): void {
+  inlineButtons.value.splice(index, 1);
+}
+
+function moveInlineButton(index: number, offset: number): void {
+  const target = index + offset;
+  if (target < 0 || target >= inlineButtons.value.length) return;
+  const [button] = inlineButtons.value.splice(index, 1);
+  inlineButtons.value.splice(target, 0, button);
+}
+
+function isHTTPSURL(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function buildInlineKeyboardJSON(): string | undefined {
+  if (inlineButtons.value.length === 0) return "[]";
+  const labels = new Set<string>();
+  for (const button of inlineButtons.value) {
+    const text = button.text.trim();
+    if (!text) {
+      ElMessage.warning("请填写所有按钮文字");
+      return undefined;
+    }
+    const labelKey = text.toLocaleLowerCase();
+    if (labels.has(labelKey)) {
+      ElMessage.warning(`按钮文字重复：${text}`);
+      return undefined;
+    }
+    labels.add(labelKey);
+    if (button.type === "url" && !isHTTPSURL(button.value.trim())) {
+      ElMessage.warning(`按钮“${text}”需要填写 HTTPS 链接`);
+      return undefined;
+    }
+    if (button.type === "action" && !builtinActionOptions.some((option) => option.value === button.value)) {
+      ElMessage.warning(`按钮“${text}”的内置功能无效`);
+      return undefined;
+    }
+  }
+  const rows = chunkInlineButtons(inlineButtons.value, inlineColumns.value).map((row) =>
+    row.map((button) => button.type === "url"
+      ? { text: button.text.trim(), url: button.value.trim() }
+      : { text: button.text.trim(), action: button.value }),
+  );
+  return JSON.stringify(rows);
+}
+
+function loadInlineKeyboard(raw?: string): void {
+  inlineButtons.value = [];
+  inlineColumns.value = 2;
+  if (!raw?.trim() || raw.trim() === "[]") return;
+  try {
+    const rows = JSON.parse(raw) as Array<Array<{ text?: string; url?: string; action?: string }>>;
+    if (!Array.isArray(rows)) return;
+    inlineColumns.value = Math.max(1, Math.min(4, ...rows.map((row) => Array.isArray(row) ? row.length : 0)));
+    inlineButtons.value = rows.flatMap((row) => Array.isArray(row) ? row : []).slice(0, 10).map((button) => ({
+      id: nextInlineButtonID++,
+      text: String(button.text || ""),
+      type: button.action ? "action" : "url",
+      value: String(button.action || button.url || ""),
+    }));
+  } catch {
+    ElMessage.warning("该任务的按钮配置无法解析，请重新配置");
+  }
 }
 
 function toRFC3339(value?: string | null): string | undefined {
@@ -554,6 +688,8 @@ function buildPayload(): ScheduledPostPayload | undefined {
     ElMessage.warning("文字任务需要填写标题或内容");
     return undefined;
   }
+  const inlineKeyboardJSON = buildInlineKeyboardJSON();
+  if (inlineKeyboardJSON == null) return undefined;
   const shouldClearInlineMedia = form.media_type === "text" || (Boolean(mediaUrl) && !hasInlineMedia) || Boolean(form.clear_inline_media);
   return {
     chat_id: chatId,
@@ -570,6 +706,7 @@ function buildPayload(): ScheduledPostPayload | undefined {
     enabled: form.enabled,
     pin_after_send: Boolean(form.pin_after_send),
     auto_delete_seconds: Number(form.auto_delete_seconds || 0),
+    inline_keyboard_json: inlineKeyboardJSON,
   };
 }
 
@@ -590,7 +727,10 @@ function openCreate(): void {
     enabled: true,
     pin_after_send: false,
     auto_delete_seconds: 0,
+    inline_keyboard_json: "[]",
   });
+  inlineColumns.value = 2;
+  inlineButtons.value = [];
   mediaFile.value = null;
   existingInlineMediaName.value = "";
   existingInlineMediaMime.value = "";
@@ -651,7 +791,9 @@ function openEdit(row: ScheduledPostRecord): void {
     enabled: row.enabled,
     pin_after_send: Boolean(row.pin_after_send),
     auto_delete_seconds: row.auto_delete_seconds || 0,
+    inline_keyboard_json: row.inline_keyboard_json || "[]",
   });
+  loadInlineKeyboard(row.inline_keyboard_json);
   mediaFile.value = null;
   existingInlineMediaName.value = row.media_name || "";
   existingInlineMediaMime.value = row.media_mime || "";
@@ -880,5 +1022,87 @@ onMounted(loadPosts);
 
 .filters :deep(.chat-select) {
   width: 100%;
+}
+
+.inline-keyboard-editor {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.inline-keyboard-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inline-columns {
+  width: 130px;
+}
+
+.inline-button-row {
+  display: grid;
+  grid-template-columns: minmax(120px, .8fr) 120px minmax(190px, 1.2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-button-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.inline-keyboard-empty,
+.form-hint {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.inline-keyboard-empty {
+  padding: 12px;
+  border: 1px dashed var(--app-border);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.inline-keyboard-preview {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: var(--app-tint-light);
+  border-radius: 6px;
+}
+
+.inline-preview-row {
+  display: flex;
+  gap: 6px;
+}
+
+.inline-preview-row span {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 6px;
+  border-radius: 5px;
+  background: var(--app-accent);
+  color: #fff;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .inline-button-row {
+    grid-template-columns: minmax(0, 1fr) 110px;
+  }
+
+  .inline-button-row > :nth-child(3),
+  .inline-button-actions {
+    grid-column: 1 / -1;
+  }
+
+  .inline-button-actions {
+    justify-content: flex-end;
+  }
 }
 </style>

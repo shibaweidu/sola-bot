@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/dabowin/sola/internal/api"
 	"github.com/dabowin/sola/internal/bot"
+	"github.com/dabowin/sola/internal/model"
 )
 
 type dailyLotteryAPIService struct{ service *DailyLotteryService }
@@ -85,6 +87,35 @@ func (s *dailyLotteryAPIService) UpdateConfig(ctx context.Context, req api.Daily
 
 func (s *dailyLotteryAPIService) ResetAttempts(ctx context.Context, chatID, userID int64) error {
 	return s.service.ResetAttempts(ctx, chatID, userID)
+}
+
+func (s *dailyLotteryAPIService) ListAttempts(ctx context.Context, query api.DailyLotteryAttemptListQuery) ([]api.DailyLotteryAttempt, error) {
+	if s == nil || s.service == nil || s.service.store == nil || s.service.store.DB == nil {
+		return []api.DailyLotteryAttempt{}, nil
+	}
+	if query.ChatID == 0 {
+		return []api.DailyLotteryAttempt{}, nil
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	db := s.service.store.DB.WithContext(ctx).Where("chat_id = ?", query.ChatID)
+	if query.UserID != 0 {
+		db = db.Where("user_id = ?", query.UserID)
+	}
+	if date := strings.TrimSpace(query.DrawDate); date != "" {
+		db = db.Where("draw_date = ?", date)
+	}
+	var rows []model.DailyLotteryAttempt
+	if err := db.Order("created_at desc").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]api.DailyLotteryAttempt, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, api.DailyLotteryAttempt{ID: row.ID, ChatID: row.ChatID, UserID: row.UserID, DrawDate: row.DrawDate, AttemptNo: row.AttemptNo, Result: row.Result, Amount: row.Amount, CostPoints: row.CostPoints, CreatedAt: row.CreatedAt})
+	}
+	return items, nil
 }
 
 func (s *dailyLotteryAPIService) ListPrizes(ctx context.Context, chatID int64) ([]api.DailyLotteryPrize, error) {

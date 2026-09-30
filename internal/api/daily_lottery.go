@@ -189,6 +189,31 @@ func (s *Server) ResetDailyLotteryAttempts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (s *Server) ListDailyLotteryAttempts(c *gin.Context) {
+	if s.deps.DailyLottery == nil {
+		writeError(c, http.StatusInternalServerError, "daily lottery service is not configured")
+		return
+	}
+	var query DailyLotteryAttemptListQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		writeError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if query.ChatID == 0 {
+		writeError(c, http.StatusBadRequest, "invalid chat_id")
+		return
+	}
+	if !s.ensureChatAllowed(c, query.ChatID) {
+		return
+	}
+	items, err := s.deps.DailyLottery.ListAttempts(c.Request.Context(), query)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
 func (s *Server) BatchUpdateDailyLotteryCodes(c *gin.Context) {
 	if s.deps.DailyLottery == nil {
 		writeError(c, http.StatusInternalServerError, "daily lottery service is not configured")

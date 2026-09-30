@@ -37,6 +37,9 @@ func (a *App) handleStart(b *gotgbot.Bot, ctx *ext.Context) error {
 		if len(args) > 0 && strings.HasPrefix(args[0], "dl_") {
 			return a.handleDailyLotteryDeepLink(b, ctx, args[0])
 		}
+		if len(args) > 0 && strings.HasPrefix(args[0], "pa_") {
+			return a.handleScheduledPostActionDeepLink(b, ctx, args[0])
+		}
 		if len(args) > 0 && strings.HasPrefix(args[0], "ref_") && a.services.PointCenter != nil && ctx.Message.From != nil {
 			result, err := a.services.PointCenter.RegisterReferralStart(requestScope(ctx).Context, b.User.Id, args[0], ctx.Message.From.Id)
 			if err != nil {

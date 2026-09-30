@@ -1272,6 +1272,11 @@ func (s *postAPIService) Create(ctx context.Context, req api.PostCreateRequest) 
 	}
 	req.CronExpr = strings.TrimSpace(req.CronExpr)
 	req.MediaType = normalizeScheduledPostMediaType(req.MediaType)
+	inlineKeyboardJSON, err := normalizeScheduledPostInlineKeyboard(req.InlineKeyboardJSON)
+	if err != nil {
+		return nil, err
+	}
+	req.InlineKeyboardJSON = inlineKeyboardJSON
 	if err := validateScheduledPostCreate(req, runOnceAt); err != nil {
 		return nil, err
 	}
@@ -1281,20 +1286,21 @@ func (s *postAPIService) Create(ctx context.Context, req api.PostCreateRequest) 
 	}
 	if s.store == nil || s.store.DB == nil {
 		return &api.Post{
-			ID:        strconv.FormatUint(uint64(now.UnixNano()), 10),
-			ChatID:    req.ChatID,
-			Title:     req.Title,
-			Content:   req.Content,
-			MediaURL:  req.MediaURL,
-			MediaType: req.MediaType,
-			CronExpr:  req.CronExpr,
-			RunOnceAt: runOnceAt,
-			Enabled:   enabled,
-			PublishAt: runOnceAt,
-			Status:    scheduledPostStatus(enabled),
-			Language:  req.Language,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:                 strconv.FormatUint(uint64(now.UnixNano()), 10),
+			ChatID:             req.ChatID,
+			Title:              req.Title,
+			Content:            req.Content,
+			MediaURL:           req.MediaURL,
+			MediaType:          req.MediaType,
+			InlineKeyboardJSON: req.InlineKeyboardJSON,
+			CronExpr:           req.CronExpr,
+			RunOnceAt:          runOnceAt,
+			Enabled:            enabled,
+			PublishAt:          runOnceAt,
+			Status:             scheduledPostStatus(enabled),
+			Language:           req.Language,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		}, nil
 	}
 	mediaURL, mediaName, mediaMime, mediaData, err := normalizeInlineMedia(req.MediaURL, req.MediaName, req.MediaMime, req.MediaDataBase64)
@@ -1302,19 +1308,20 @@ func (s *postAPIService) Create(ctx context.Context, req api.PostCreateRequest) 
 		return nil, err
 	}
 	post := model.ScheduledPost{
-		ChatID:            req.ChatID,
-		Title:             req.Title,
-		Content:           req.Content,
-		MediaURL:          mediaURL,
-		MediaName:         mediaName,
-		MediaMime:         mediaMime,
-		MediaData:         mediaData,
-		MediaType:         req.MediaType,
-		CronExpr:          req.CronExpr,
-		RunOnceAt:         runOnceAt,
-		Enabled:           enabled,
-		CreatedAt:         now,
-		AutoDeleteSeconds: req.AutoDeleteSeconds,
+		ChatID:             req.ChatID,
+		Title:              req.Title,
+		Content:            req.Content,
+		MediaURL:           mediaURL,
+		MediaName:          mediaName,
+		MediaMime:          mediaMime,
+		MediaData:          mediaData,
+		MediaType:          req.MediaType,
+		InlineKeyboardJSON: req.InlineKeyboardJSON,
+		CronExpr:           req.CronExpr,
+		RunOnceAt:          runOnceAt,
+		Enabled:            enabled,
+		CreatedAt:          now,
+		AutoDeleteSeconds:  req.AutoDeleteSeconds,
 	}
 	if req.PinAfterSend != nil {
 		post.PinAfterSend = *req.PinAfterSend
@@ -1463,6 +1470,13 @@ func (s *postAPIService) Update(ctx context.Context, id string, req api.PostUpda
 	}
 	if req.AutoDeleteSeconds != nil {
 		updates["auto_delete_seconds"] = *req.AutoDeleteSeconds
+	}
+	if req.InlineKeyboardJSON != nil {
+		inlineKeyboardJSON, err := normalizeScheduledPostInlineKeyboard(*req.InlineKeyboardJSON)
+		if err != nil {
+			return nil, err
+		}
+		updates["inline_keyboard_json"] = inlineKeyboardJSON
 	}
 	if len(updates) > 0 {
 		if err := s.store.DB.WithContext(ctx).Model(&model.ScheduledPost{}).Where("id = ?", parsed).Updates(updates).Error; err != nil {
@@ -2398,26 +2412,98 @@ func modelPostToAPI(post model.Post, chatID int64) *api.Post {
 
 func modelScheduledPostToAPI(post model.ScheduledPost) api.Post {
 	return api.Post{
-		ID:                strconv.FormatUint(post.ID, 10),
-		ChatID:            post.ChatID,
-		Title:             post.Title,
-		Content:           post.Content,
-		MediaURL:          post.MediaURL,
-		MediaName:         post.MediaName,
-		MediaMime:         post.MediaMime,
-		HasInlineMedia:    len(post.MediaData) > 0,
-		MediaType:         post.MediaType,
-		CronExpr:          post.CronExpr,
-		RunOnceAt:         post.RunOnceAt,
-		Enabled:           post.Enabled,
-		LastRunAt:         post.LastRunAt,
-		PublishAt:         post.RunOnceAt,
-		Status:            scheduledPostStatus(post.Enabled),
-		CreatedAt:         post.CreatedAt,
-		UpdatedAt:         post.CreatedAt,
-		PinAfterSend:      post.PinAfterSend,
-		AutoDeleteSeconds: post.AutoDeleteSeconds,
+		ID:                 strconv.FormatUint(post.ID, 10),
+		ChatID:             post.ChatID,
+		Title:              post.Title,
+		Content:            post.Content,
+		MediaURL:           post.MediaURL,
+		MediaName:          post.MediaName,
+		MediaMime:          post.MediaMime,
+		HasInlineMedia:     len(post.MediaData) > 0,
+		MediaType:          post.MediaType,
+		CronExpr:           post.CronExpr,
+		RunOnceAt:          post.RunOnceAt,
+		Enabled:            post.Enabled,
+		LastRunAt:          post.LastRunAt,
+		PublishAt:          post.RunOnceAt,
+		Status:             scheduledPostStatus(post.Enabled),
+		CreatedAt:          post.CreatedAt,
+		UpdatedAt:          post.CreatedAt,
+		PinAfterSend:       post.PinAfterSend,
+		AutoDeleteSeconds:  post.AutoDeleteSeconds,
+		InlineKeyboardJSON: normalizedStoredInlineKeyboard(post.InlineKeyboardJSON),
 	}
+}
+
+type scheduledPostInlineButton struct {
+	Text   string `json:"text"`
+	URL    string `json:"url,omitempty"`
+	Action string `json:"action,omitempty"`
+}
+
+var scheduledPostBuiltinActions = map[string]struct{}{
+	"sign": {}, "daily_lottery": {}, "invite_rewards": {},
+	"points": {}, "rank": {}, "exchange": {},
+}
+
+func normalizeScheduledPostInlineKeyboard(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return "[]", nil
+	}
+	var rows [][]scheduledPostInlineButton
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		return "", fmt.Errorf("%w: invalid inline keyboard JSON", api.ErrBadRequest)
+	}
+	buttonCount := 0
+	labels := make(map[string]struct{})
+	for rowIndex := range rows {
+		if len(rows[rowIndex]) == 0 || len(rows[rowIndex]) > 4 {
+			return "", fmt.Errorf("%w: each inline keyboard row must contain 1 to 4 buttons", api.ErrBadRequest)
+		}
+		for buttonIndex := range rows[rowIndex] {
+			button := &rows[rowIndex][buttonIndex]
+			button.Text = strings.TrimSpace(button.Text)
+			button.URL = strings.TrimSpace(button.URL)
+			button.Action = strings.TrimSpace(button.Action)
+			if button.Text == "" || len([]rune(button.Text)) > 64 {
+				return "", fmt.Errorf("%w: inline button text must contain 1 to 64 characters", api.ErrBadRequest)
+			}
+			labelKey := strings.ToLower(button.Text)
+			if _, exists := labels[labelKey]; exists {
+				return "", fmt.Errorf("%w: inline button text must be unique", api.ErrBadRequest)
+			}
+			labels[labelKey] = struct{}{}
+			if (button.URL == "") == (button.Action == "") {
+				return "", fmt.Errorf("%w: each inline button requires exactly one URL or built-in action", api.ErrBadRequest)
+			}
+			if button.URL != "" && !validHTTPSURL(button.URL) {
+				return "", fmt.Errorf("%w: inline button URLs must use HTTPS", api.ErrBadRequest)
+			}
+			if button.Action != "" {
+				if _, ok := scheduledPostBuiltinActions[button.Action]; !ok {
+					return "", fmt.Errorf("%w: unsupported inline button action", api.ErrBadRequest)
+				}
+			}
+			buttonCount++
+		}
+	}
+	if buttonCount > 10 {
+		return "", fmt.Errorf("%w: inline keyboard supports at most 10 buttons", api.ErrBadRequest)
+	}
+	normalized, err := json.Marshal(rows)
+	if err != nil {
+		return "", fmt.Errorf("%w: invalid inline keyboard", api.ErrBadRequest)
+	}
+	return string(normalized), nil
+}
+
+func normalizedStoredInlineKeyboard(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return "[]"
+	}
+	return raw
 }
 
 func levelConfigToAPI(record model.LevelConfig) api.Level {
